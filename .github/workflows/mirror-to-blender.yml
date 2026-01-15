@@ -1,0 +1,21 @@
+name: Mirror to projects.blender.org
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Blender Git
+        run: |
+          git remote add blender https://alfa-haliza:${{ secrets.BLENDER_TOKEN }}@projects.blender.org/alfa-haliza/3D-Asset-Manager.git
+          git push blender main --force
+
