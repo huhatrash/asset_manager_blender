@@ -9,13 +9,18 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Push to Blender Git
+      - name: Setup SSH
         run: |
-          git remote add blender https://alfa-haliza:${{ secrets.BLENDER_TOKEN }}@projects.blender.org/alfa-haliza/3D-Asset-Manager.git
-          git push blender main --force
+          mkdir -p ~/.ssh
+          echo "${{ secrets.BLENDER_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan projects.blender.org >> ~/.ssh/known_hosts
 
+      - name: Push mirror
+        run: |
+          git remote add blender git@projects.blender.org:alfa-haliza/3D-Asset-Manager.git
+          git push --mirror blender
