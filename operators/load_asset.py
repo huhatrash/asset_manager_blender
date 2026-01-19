@@ -1,24 +1,37 @@
 import bpy
-from ..core import database, preview
+import os
+from ..core.database import db_get_by_id
+from ..core.scene_assets import load_assets_to_scene
 
-class ASSETMANAGER_OT_load_assets(bpy.types.Operator):
-    bl_idname = "assetmanager.load_assets"
-    bl_label = "Load Assets"
+class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
+    bl_idname = "assetmanager.load_from_db"
+    bl_label = "Load Asset from Database"
+    asset_id: bpy.props.IntProperty()
 
     def execute(self, context):
-        scene = context.scene
-        scene.asset_items.clear()
+        rec = db_get_by_id(self.asset_id)
+        if not rec:
+            self.report({'WARNING'}, "Asset not found")
+            return {'CANCELLED'}
 
-        assets = database.get_all()
-        previews = preview.load_previews(assets)
+        fpath = rec.get('file_path') or ""
+        if not fpath or not os.path.exists(fpath):
+            self.report({'WARNING'}, f"File missing: {fpath}")
+            return {'CANCELLED'}
 
-        for a in assets:
-            item = scene.asset_items.add()
-            item.id = a["id"]
-            item.name = a["name"]
-            item.category = a["category"]
-            item.description = a["description"]
-            item.file_path = a["file_path"]
-            item.preview_icon = f"asset_{a['id']}"
+        ext = os.path.splitext(fpath)[1].lower()
+        try:
+            if ext == '.fbx':
+                bpy.ops.import_scene.fbx(filepath=fpath)
+            elif ext == '.blend':
+                # append: open blend and append objects by name may need user input
+                bpy.ops.wm.append(filepath=fpath)
+            else:
+                self.report({'WARNING'}, f"Unsupported import ext: {ext}")
+                return {'CANCELLED'}
+            self.report({'INFO'}, f"Imported {rec['name']} from {fpath}")
+        except Exception as e:
+            self.report({'ERROR'}, f"Import failed: {e}")
+            return {'CANCELLED'}
 
         return {'FINISHED'}

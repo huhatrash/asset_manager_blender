@@ -1,31 +1,52 @@
 bl_info = {
-    "name": "3D Asset Manager",
+    "name": "Local Asset Manager",
     "author": "alfa haliza",
     "version": (1, 0, 0),
     "blender": (3, 6, 0),
-    "location": "View3D > Sidebar > Asset Manager",
-    "description": "Manage, preview, and export 3D assets using SQLite",
+    "description": "Register, load, import, export, and preview local assets",
     "category": "3D View",
 }
 
 import bpy
+import uuid
+import os
 
-from .core.paths import ensure_dirs
-from .core.database import create_table
+from .operators import (
+    register_asset,
+    update_asset,
+    delete_asset,
+    load_asset,
+    import_local,
+    export_local,
+    show_catalog,
+)
 
-from .properties import scene_props
-from .operators import load_asset
-from .ui import panel
+from .ui.panel import ASSETMANAGER_PT_panel
+from .ui.ui_list import ASSETMANAGER_UL_list
+from .properties.scene_props import AssetItem, init_scene_properties, clear_scene_properties
+from .core.database import create_table_if_not_exists
+
+classes = (
+    AssetItem,
+    ASSETMANAGER_UL_list,
+    register_asset.ASSETMANAGER_OT_register,
+    load_asset.ASSETMANAGER_OT_load_from_db,
+    import_local.ASSETMANAGER_OT_import_local,
+    export_local.ASSETMANAGER_OT_export_local,
+    delete_asset.ASSETMANAGER_OT_delete,
+    update_asset.ASSETMANAGER_OT_update,
+    show_catalog.ASSETMANAGER_OT_show_catalog,
+    ASSETMANAGER_PT_panel,
+)
 
 def register():
-    ensure_dirs()
-    create_table()
+    for c in classes:
+        bpy.utils.register_class(c)
 
-    scene_props.register()
-    bpy.utils.register_class(load_asset.ASSETMANAGER_OT_load_assets)
-    bpy.utils.register_class(panel.ASSETMANAGER_PT_panel)
+    init_scene_properties()
+    create_table_if_not_exists()
 
 def unregister():
-    bpy.utils.unregister_class(panel.ASSETMANAGER_PT_panel)
-    bpy.utils.unregister_class(load_asset.ASSETMANAGER_OT_load_assets)
-    scene_props.unregister()
+    clear_scene_properties()
+    for c in reversed(classes):
+        bpy.utils.unregister_class(c)
