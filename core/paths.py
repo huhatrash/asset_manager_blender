@@ -8,6 +8,7 @@ BASE_DIR = bpy.utils.user_resource(
 )
 
 DB_PATH = os.path.join(BASE_DIR, "assets.db")
+
 DATA_DIR = os.path.join(BASE_DIR, "data")
 EXPORTS_DIR = os.path.join(DATA_DIR, "exports")
 THUMBS_DIR = os.path.join(DATA_DIR, "thumbs")

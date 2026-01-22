@@ -1,59 +1,57 @@
 import bpy
 import os
-from ..core.database import db_get_all
 
-preview_collection = None
+_preview_collection = None
+
+
+# ==============================
+# GET COLLECTION
+# ==============================
+
+def get_preview_collection():
+    global _preview_collection
+
+    if _preview_collection is None:
+        _preview_collection = bpy.utils.previews.new()
+
+    return _preview_collection
+
+
+# ==============================
+# LOAD PREVIEWS
+# ==============================
+
 def load_previews_for_assets(assets):
-    global preview_collection
 
-    if preview_collection is None:
-        preview_collection = bpy.utils.previews.new()
+    pcoll = get_preview_collection()
 
     for a in assets:
-        key = f"asset_{a['id']}"
-        thumb = a.get("thumbnail_path")
 
-        if not thumb or not os.path.exists(thumb):
+        key = f"asset_{a['uuid']}"
+        path = a.get("thumbnail_path")
+
+        if not path:
             continue
 
-        if key in preview_collection:
-            try:
-                preview_collection.remove(key)
-            except Exception:
-                pass
+        if not os.path.exists(path):
+            continue
 
-        try:
-            preview_collection.load(key, thumb, 'IMAGE')
-        except Exception as e:
-            print("Preview load error:", e)
+        if key in pcoll:
+            continue
 
-    return preview_collection
+        pcoll.load(key, path, 'IMAGE')
 
-def refresh_asset_preview(asset_id, thumb_path):
-    # ===== FORCE FULL PREVIEW RELOAD =====
-    global preview_collection
-    if preview_collection:
-        bpy.utils.previews.remove(preview_collection)
-        preview_collection = None
+    return pcoll
 
-    load_previews_for_assets(db_get_all())
 
-    key = f"asset_{asset_id}"
+# ==============================
+# CLEAR
+# ==============================
 
-    if preview_collection:
-        if key in preview_collection:
-            try:
-                preview_collection.remove(key)
-            except Exception:
-                pass
+def clear_previews():
 
-        try:
-            preview_collection.load(key, thumb_path, 'IMAGE')
-        except Exception as e:
-            print("Preview reload error:", e)
+    global _preview_collection
 
-def update_preview(self, context):
-    idx = context.scene.asset_index
-    if idx >= 0 and idx < len(context.scene.asset_items):
-        item = context.scene.asset_items[idx]
-        context.scene.asset_preview = item.preview_icon
+    if _preview_collection:
+        bpy.utils.previews.remove(_preview_collection)
+        _preview_collection = None

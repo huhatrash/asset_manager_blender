@@ -15,7 +15,8 @@ def export_selected_to_fbx(obj, exports_dir):
         o.select_set(True)
     return out_path
 
-def export_selected_with_textures(obj, exports_dir, asset_uuid, force_name=None, file_format='FBX'):
+def export_selected_with_textures(obj, exports_dir, file_format='FBX', force_name=None):
+    
     import bpy, os
 
     prev_sel = [o for o in bpy.context.selected_objects]
@@ -23,8 +24,8 @@ def export_selected_with_textures(obj, exports_dir, asset_uuid, force_name=None,
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
 
-    # 🔒 NAMA FILE = UUID (BUKAN NAMA OBJECT)
-    out_path = os.path.join(exports_dir, f"{asset_uuid}.fbx")
+    filename = force_name if force_name else obj.name
+    out_path = os.path.join(exports_dir, f"{filename}.{file_format.lower()}")
 
     if file_format.upper() == 'FBX':
         bpy.ops.export_scene.fbx(
