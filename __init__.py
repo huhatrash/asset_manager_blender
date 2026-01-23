@@ -1,20 +1,45 @@
+"""
+Asset Manager Blender Addon
+Main initialization file.
+
+Author: alfa haliza
+Version: 2.0 (Optimized for 1000+ assets)
+"""
+
 bl_info = {
     "name": "Local Asset Manager",
     "author": "alfa haliza",
-    "version": (1, 0, 0),
+    "version": (2, 0, 0),
     "blender": (3, 6, 0),
-    "description": "Register, load, import, export, and preview local assets",
+    "description": "Professional asset management with support for thousands of assets",
     "category": "3D View",
+    "doc_url": "",
+    "tracker_url": "",
 }
 
 import bpy
 from bpy.app.handlers import persistent
 
 
-# ==============================
-# IMPORT MODULE
-# ==============================
+# =====================================================
+# IMPORT MODULES
+# =====================================================
 
+# Core modules
+from .core import database, paths
+from .core.database import init_db, db_get_paginated
+from .core.scene_assets import load_assets_to_scene
+from .core.preview import load_preview_for_single_asset, clear_previews
+from .core.paths import init_directories
+
+# Properties
+from .properties.scene_props import (
+    AssetItem,
+    init_scene_properties,
+    clear_scene_properties,
+)
+
+# Operators
 from .operators import (
     register_asset,
     update_asset,
@@ -23,121 +48,164 @@ from .operators import (
     import_local,
     export_local,
     show_catalog,
+    pagination_operators,
 )
 
-from .ui.panel import ASSETMANAGER_PT_panel
+# UI
+from .ui.panel import ASSETMANAGER_PT_panel, ASSETMANAGER_PT_quick_filters
 from .ui.ui_list import ASSETMANAGER_UL_list
 
-from .properties.scene_props import (
-    AssetItem,
-    init_scene_properties,
-    clear_scene_properties,
-)
 
-from .core.database import init_db, db_get_all
-from .core.scene_assets import load_assets_to_scene
-from .core.preview import load_previews_for_assets, clear_previews
-
-
-# ==============================
-# CLASSES
-# ==============================
+# =====================================================
+# CLASSES TO REGISTER
+# =====================================================
 
 classes = (
+    # Properties
     AssetItem,
-
+    
+    # UI List
     ASSETMANAGER_UL_list,
-
+    
+    # Main Operators
     register_asset.ASSETMANAGER_OT_register,
+    update_asset.ASSETMANAGER_OT_update,
+    delete_asset.ASSETMANAGER_OT_delete,
     load_asset.ASSETMANAGER_OT_load_from_db,
     import_local.ASSETMANAGER_OT_import_local,
     export_local.ASSETMANAGER_OT_export_local,
-    delete_asset.ASSETMANAGER_OT_delete,
-    update_asset.ASSETMANAGER_OT_update,
     show_catalog.ASSETMANAGER_OT_show_catalog,
-
+    
+    # Pagination Operators
+    pagination_operators.ASSETMANAGER_OT_next_page,
+    pagination_operators.ASSETMANAGER_OT_previous_page,
+    pagination_operators.ASSETMANAGER_OT_first_page,
+    pagination_operators.ASSETMANAGER_OT_last_page,
+    pagination_operators.ASSETMANAGER_OT_go_to_page,
+    pagination_operators.ASSETMANAGER_OT_apply_filters,
+    pagination_operators.ASSETMANAGER_OT_clear_filters,
+    pagination_operators.ASSETMANAGER_OT_refresh_assets,
+    pagination_operators.ASSETMANAGER_OT_change_page_size,
+    pagination_operators.ASSETMANAGER_OT_change_sort,
+    pagination_operators.ASSETMANAGER_OT_show_statistics,
+    
+    # Panels
     ASSETMANAGER_PT_panel,
+    ASSETMANAGER_PT_quick_filters,
 )
 
 
-# ==============================
+# =====================================================
 # STARTUP HANDLER
-# ==============================
+# =====================================================
 
 @persistent
 def assetmanager_on_load(dummy):
-
+    """
+    Handler called when Blender file is loaded.
+    Loads assets into UI with pagination.
+    """
     try:
-
+        # Get window manager and window
         wm = bpy.context.window_manager
         win = bpy.context.window
-
+        
         if not win:
             return
-
+        
         scene = win.scene
-
         if not scene:
             return
-
+        
+        # Create dummy context
         class DummyContext:
             pass
-
+        
         ctx = DummyContext()
         ctx.scene = scene
-
-        # Reload assets
-        load_assets_to_scene(ctx)
-
-        # Reload previews
-        assets = db_get_all()
-        load_previews_for_assets(assets)
-
-        print("[AssetManager] Assets reloaded")
-
+        
+        # Get page size from preferences or use default
+        page_size = getattr(scene, "asset_page_size", 50)
+        
+        # Load first page of assets
+        load_assets_to_scene(ctx, page=0, page_size=page_size, force_reload=True)
+        
+        print(f"[AssetManager] Loaded assets (page 1, {page_size} items per page)")
+        
     except Exception as e:
-        print("[AssetManager] Load error:", e)
+        print(f"[AssetManager] Load error: {e}")
+        import traceback
+        traceback.print_exc()
 
-# ==============================
+
+# =====================================================
 # REGISTER
-# ==============================
+# =====================================================
 
 def register():
-
-    # Register classes
-    for c in classes:
-        bpy.utils.register_class(c)
-
-    # Init Scene
+    """Register addon classes and initialize."""
+    print("[AssetManager] Registering addon...")
+    
+    # Register all classes
+    for cls in classes:
+        try:
+            bpy.utils.register_class(cls)
+        except Exception as e:
+            print(f"[AssetManager] Failed to register {cls}: {e}")
+    
+    # Initialize directories
+    init_directories()
+    
+    # Initialize scene properties
     init_scene_properties()
-
-    # Init DB
+    
+    # Initialize database
     init_db()
-
+    
     # Load assets immediately
-    assetmanager_on_load(None)
-
-    # Register handler
+    try:
+        assetmanager_on_load(None)
+    except Exception as e:
+        print(f"[AssetManager] Initial load failed: {e}")
+    
+    # Register handler for file load
     if assetmanager_on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(assetmanager_on_load)
+    
+    print("[AssetManager] Addon registered successfully")
 
 
-# ==============================
+# =====================================================
 # UNREGISTER
-# ==============================
+# =====================================================
 
 def unregister():
-
+    """Unregister addon and cleanup."""
+    print("[AssetManager] Unregistering addon...")
+    
     # Remove handler
     if assetmanager_on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(assetmanager_on_load)
-
+    
     # Clear preview cache
     clear_previews()
-
-    # Clear Scene props
+    
+    # Clear scene properties
     clear_scene_properties()
+    
+    # Unregister classes in reverse order
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception as e:
+            print(f"[AssetManager] Failed to unregister {cls}: {e}")
+    
+    print("[AssetManager] Addon unregistered successfully")
 
-    # Unregister classes
-    for c in reversed(classes):
-        bpy.utils.unregister_class(c)
+
+# =====================================================
+# MAIN
+# =====================================================
+
+if __name__ == "__main__":
+    register()

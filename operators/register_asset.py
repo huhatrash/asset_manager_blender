@@ -1,130 +1,293 @@
+"""
+Register Asset Operator - Asset Manager
+Handles registration of new assets to the library.
+
+Author: alfa haliza
+Version: 2.0 (Bug Fixed)
+"""
+
 import bpy
 import os
 import uuid
 
-from ..core.paths import EXPORTS_DIR, THUMBS_DIR
-from ..core.export_import import export_selected_with_textures
+from ..core.paths import get_exports_dir, get_thumbnails_dir
+from ..core.export_import import export_selected_with_textures, validate_export_path
 from ..core.thumbnail import render_thumbnail_for_object
-from ..core.database import db_insert_or_update_by_uuid
-from ..core.scene_assets import load_assets_to_scene
+from ..core.database import db_insert_or_update_by_uuid, db_get_by_uuid
+from ..core.scene_assets import add_single_asset_to_scene
 
 
 class ASSETMANAGER_OT_register(bpy.types.Operator):
+    """Register selected object as asset"""
     bl_idname = "assetmanager.register"
     bl_label = "Register Selected Asset"
-    bl_description = "Export selected object, generate thumbnail, and save metadata"
+    bl_description = "Export selected object, generate thumbnail, and save to asset library"
     bl_options = {'REGISTER', 'UNDO'}
 
+    # Properties
     asset_name: bpy.props.StringProperty(
         name="Asset Name",
+        description="Name for the asset",
         default=""
     )
 
     category: bpy.props.EnumProperty(
         name="Category",
+        description="Asset category",
         items=[
-            ('model', 'Model', ''),
-            ('character', 'Character', ''),
-            ('environment', 'Environment', ''),
-            ('props', 'Props', ''),
+            ('model', 'Model', 'Generic 3D model'),
+            ('character', 'Character', 'Character or creature'),
+            ('environment', 'Environment', 'Environment piece'),
+            ('props', 'Props', 'Prop object'),
         ],
         default='model'
     )
 
     description: bpy.props.StringProperty(
         name="Description",
+        description="Asset description",
         default=""
     )
 
     file_format: bpy.props.EnumProperty(
         name="Export Format",
+        description="File format for export",
         items=[
-            ('FBX', 'FBX (.fbx)', ''),
-            ('BLEND', 'BLEND (.blend)', ''),
+            ('FBX', 'FBX (.fbx)', 'Export as FBX format'),
+            ('BLEND', 'BLEND (.blend)', 'Export as Blender file'),
         ],
         default='FBX'
     )
+    
+    generate_thumbnail: bpy.props.BoolProperty(
+        name="Generate Thumbnail",
+        description="Render thumbnail preview",
+        default=True
+    )
+    
+    thumbnail_size: bpy.props.EnumProperty(
+        name="Thumbnail Size",
+        items=[
+            ('128', '128x128', 'Small thumbnail'),
+            ('256', '256x256', 'Medium thumbnail (recommended)'),
+            ('512', '512x512', 'Large thumbnail'),
+        ],
+        default='256'
+    )
 
-    # --------------------------------------------------
+    # =====================================================
+    # POLL
+    # =====================================================
+
+    @classmethod
+    def poll(cls, context):
+        """Check if operator can run."""
+        obj = context.active_object
+        return obj is not None and obj.type == 'MESH'
+
+    # =====================================================
+    # INVOKE
+    # =====================================================
 
     def invoke(self, context, event):
+        """Initialize properties before showing dialog."""
         obj = context.active_object
+        
         if not obj:
             self.report({'WARNING'}, "No active object selected")
             return {'CANCELLED'}
-
+        
+        # Set default name from object
         self.asset_name = obj.name
-        self.description = f"Generated from object '{obj.name}'"
-        return context.window_manager.invoke_props_dialog(self)
+        self.description = f"Asset created from '{obj.name}'"
+        
+        return context.window_manager.invoke_props_dialog(self, width=400)
 
-    # --------------------------------------------------
+    # =====================================================
+    # DRAW
+    # =====================================================
 
     def draw(self, context):
+        """Draw operator properties in dialog."""
         layout = self.layout
-        layout.prop(self, "asset_name")
-        layout.prop(self, "category")
-        layout.prop(self, "description")
-        layout.prop(self, "file_format")
+        
+        # Asset Info
+        box = layout.box()
+        box.label(text="Asset Information", icon='INFO')
+        box.prop(self, "asset_name")
+        box.prop(self, "category")
+        box.prop(self, "description")
+        
+        # Export Settings
+        box = layout.box()
+        box.label(text="Export Settings", icon='EXPORT')
+        box.prop(self, "file_format")
+        
+        # Thumbnail Settings
+        box = layout.box()
+        box.label(text="Thumbnail Settings", icon='IMAGE_DATA')
+        box.prop(self, "generate_thumbnail")
+        if self.generate_thumbnail:
+            box.prop(self, "thumbnail_size")
 
-    # --------------------------------------------------
+    # =====================================================
+    # EXECUTE
+    # =====================================================
 
     def execute(self, context):
+        """Main execution logic."""
         obj = context.active_object
 
+        # Validation
         if not obj or obj.type != 'MESH':
             self.report({'ERROR'}, "Active object must be a mesh")
             return {'CANCELLED'}
+        
+        if not self.asset_name.strip():
+            self.report({'ERROR'}, "Asset name cannot be empty")
+            return {'CANCELLED'}
 
         try:
-            # UUID = identity asset
+            # ✅ FIX: Generate UUID only ONCE
             asset_uuid = str(uuid.uuid4())
-
-            # 1. Export asset
-            file_path = export_selected_with_textures(
-                obj,
-                EXPORTS_DIR,
-                file_format=self.file_format,
-                force_name=asset_uuid
-            )
-            asset_uuid = str(uuid.uuid4())
-
-            if not file_path or not os.path.exists(file_path):
-                raise RuntimeError("Export failed")
-
-            # 2. Geometry stats
-            poly_count = len(obj.data.polygons)
-            vertices = len(obj.data.vertices)
-            faces = len(obj.data.polygons)
+            
+            # Step 1: Export asset file
+            self.report({'INFO'}, "Exporting asset...")
+            file_path = self._export_asset(obj, asset_uuid)
+            
+            if not file_path:
+                raise RuntimeError("Export failed - file not created")
+            
+            # Validate export
+            is_valid, error = validate_export_path(file_path)
+            if not is_valid:
+                raise RuntimeError(f"Export validation failed: {error}")
+            
+            # Step 2: Calculate geometry statistics
+            stats = self._calculate_geometry_stats(obj)
             file_size = os.path.getsize(file_path)
-
-            # 3. Thumbnail
-            thumb_path = os.path.join(THUMBS_DIR, f"{asset_uuid}.png")
-            render_thumbnail_for_object(obj, thumb_path, size=(256, 256))
-
-            # 4. Save to DB (URUTAN BENAR)
+            
+            # Step 3: Generate thumbnail (ALWAYS generate for preview)
+            self.report({'INFO'}, "Rendering thumbnail...")
+            thumbnail_path = self._generate_thumbnail(obj, asset_uuid)
+            
+            # Step 4: Save to database
+            self.report({'INFO'}, "Saving to database...")
             inserted = db_insert_or_update_by_uuid(
                 asset_uuid,
-                self.asset_name,
+                self.asset_name.strip(),
                 self.category,
-                self.description,
+                self.description.strip(),
                 file_path,
-                thumb_path,
+                thumbnail_path,
                 file_size,
-                poly_count,
-                vertices,
-                faces
+                stats['poly_count'],
+                stats['vertices'],
+                stats['faces']
             )
-
-            # 5. Refresh UI
-            load_assets_to_scene(context)
-
-            self.report(
-                {'INFO'},
-                "Asset registered" if inserted else "Asset updated"
-            )
-
+            
+            # Step 5: Update UI & Load Preview
+            asset_data = db_get_by_uuid(asset_uuid)
+            if asset_data:
+                # Load preview immediately after registration
+                from ..core.preview import load_preview_for_single_asset
+                load_preview_for_single_asset(asset_data)
+                
+                # Add to scene
+                add_single_asset_to_scene(context, asset_data['id'])
+                
+                # Refresh UI to show preview
+                if context.area:
+                    context.area.tag_redraw()
+            
+            # Report success
+            action = "registered" if inserted else "updated"
+            self.report({'INFO'}, f"Asset '{self.asset_name}' {action} successfully")
+            
             return {'FINISHED'}
 
         except Exception as e:
-            self.report({'ERROR'}, str(e))
+            self.report({'ERROR'}, f"Registration failed: {str(e)}")
+            
+            # Log error for debugging
+            import traceback
+            print(f"[AssetManager] Registration error:")
+            traceback.print_exc()
+            
             return {'CANCELLED'}
+
+    # =====================================================
+    # HELPER METHODS
+    # =====================================================
+
+    def _export_asset(self, obj, asset_uuid):
+        """
+        Export asset to file.
+        
+        Args:
+            obj: Object to export
+            asset_uuid: UUID for filename
+        
+        Returns:
+            str: Path to exported file
+        """
+        exports_dir = get_exports_dir()
+        
+        file_path = export_selected_with_textures(
+            obj,
+            exports_dir,
+            file_format=self.file_format,
+            force_name=asset_uuid  # ✅ Use same UUID
+        )
+        
+        return file_path
+
+    def _generate_thumbnail(self, obj, asset_uuid):
+        """
+        Generate thumbnail for asset.
+        
+        Args:
+            obj: Object to render
+            asset_uuid: UUID for filename
+        
+        Returns:
+            str: Path to thumbnail, or None if failed
+        """
+        thumbs_dir = get_thumbnails_dir()
+        thumbnail_path = os.path.join(thumbs_dir, f"{asset_uuid}.png")
+        
+        # Get size
+        size = int(self.thumbnail_size)
+        
+        # Render
+        success = render_thumbnail_for_object(
+            obj,
+            thumbnail_path,
+            size=(size, size),
+            samples=32,
+            use_transparent=False
+        )
+        
+        if success and os.path.exists(thumbnail_path):
+            return thumbnail_path
+        else:
+            print(f"[AssetManager] Thumbnail generation failed")
+            return None
+
+    def _calculate_geometry_stats(self, obj):
+        """
+        Calculate geometry statistics.
+        
+        Args:
+            obj: Mesh object
+        
+        Returns:
+            dict: Statistics
+        """
+        mesh = obj.data
+        
+        return {
+            'poly_count': len(mesh.polygons),
+            'vertices': len(mesh.vertices),
+            'faces': len(mesh.polygons)
+        }
