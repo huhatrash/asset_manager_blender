@@ -1,12 +1,13 @@
 """
 UIList - Asset Manager
-Custom UI list with preview icons.
+Custom UI list with SMALLER preview icons.
 
 Author: alfa haliza
-Version: 2.1 (With Preview Icons)
+Version: 2.2 (Fixed Icon Size)
 """
 
 import bpy
+import os
 from ..core.preview import get_preview_collection, load_preview_for_single_asset
 from ..core.database import db_get_by_id
 
@@ -15,19 +16,8 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
     """Custom UIList for asset display with preview icons"""
     
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        """
-        Draw single list item with preview icon.
+        """Draw single list item with preview icon"""
         
-        Args:
-            context: Blender context
-            layout: UI layout
-            data: Data container (Scene)
-            item: AssetItem being drawn
-            icon: Icon ID
-            active_data: Active data
-            active_propname: Active property name
-            index: Item index
-        """
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
             # Get preview icon
             preview_icon_id = self._get_preview_icon(item)
@@ -44,15 +34,14 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             # Main row
             row = layout.row(align=True)
             
-            # Preview thumbnail (if available)
+            # ✅ PREVIEW THUMBNAIL - UKURAN KECIL (1.0 scale)
             if preview_icon_id > 0:
-                row.template_icon(icon_value=preview_icon_id, scale=2.0)
+                row.template_icon(icon_value=preview_icon_id, scale=1.0)
             else:
-                # Fallback to category icon
                 row.label(text="", icon=cat_icon)
             
-            # Split for name and stats
-            split = row.split(factor=0.65, align=True)
+            # Split untuk name dan stats
+            split = row.split(factor=0.6, align=True)
             
             # Left: Name
             col = split.column()
@@ -79,65 +68,67 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             # Get preview icon
             preview_icon_id = self._get_preview_icon(item)
             
+            # ✅ GRID VIEW - ukuran sedang (3.0 scale)
             if preview_icon_id > 0:
-                layout.template_icon(icon_value=preview_icon_id, scale=4.0)
+                layout.template_icon(icon_value=preview_icon_id, scale=3.0)
             else:
                 layout.label(text="", icon='FILE_3D')
             
-            # Asset name below icon
+            # Asset name
             layout.label(text=item.name)
     
     def _get_preview_icon(self, item):
-        """
-        Get preview icon ID for an asset item.
-        
-        Args:
-            item: AssetItem
-        
-        Returns:
-            int: Icon ID (0 if not found)
-        """
+        """Get preview icon ID for an asset item"""
         try:
             pcoll = get_preview_collection()
             
             if not pcoll:
                 return 0
             
-            # Get preview key
-            preview_key = item.preview_icon
+            # Check preview key
+            preview_key = item.preview_icon if item.preview_icon else f"asset_{item.uuid}"
             
-            if not preview_key:
-                preview_key = f"asset_{item.uuid}"
-            
-            # Check if preview exists
+            # Jika sudah ada di cache
             if preview_key in pcoll:
                 return pcoll[preview_key].icon_id
             
-            # Try to load preview on-demand
+            # ✅ LOAD ON-DEMAND dari thumbnail file
             asset_data = db_get_by_id(item.id)
-            if asset_data:
-                preview = load_preview_for_single_asset(asset_data)
-                if preview:
-                    return preview.icon_id
+            if not asset_data:
+                return 0
+            
+            thumbnail_path = asset_data.get('thumbnail_path')
+            if thumbnail_path and os.path.exists(thumbnail_path):
+                # Load ke preview collection
+                try:
+                    preview = pcoll.load(preview_key, thumbnail_path, 'IMAGE')
+                    if preview:
+                        item.preview_icon = preview_key
+                        return preview.icon_id
+                except Exception as e:
+                    print(f"[AssetManager] Failed to load preview: {e}")
+            
+            # Fallback
+            preview = load_preview_for_single_asset(asset_data)
+            if preview:
+                return preview.icon_id
             
             return 0
             
         except Exception as e:
-            print(f"[AssetManager] Failed to get preview icon: {e}")
+            print(f"[AssetManager] Preview icon error: {e}")
             return 0
 
 
-# Compact variant (no preview icons, faster)
 class ASSETMANAGER_UL_list_compact(bpy.types.UIList):
-    """Compact UIList variant without preview icons"""
+    """Compact UIList - no preview icons"""
     
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        """Draw single item - compact version."""
+        """Draw compact item"""
+        
         if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            # Simple one-line display
             row = layout.row(align=True)
             
-            # Category icon
             category_icons = {
                 'model': 'MESH_CUBE',
                 'character': 'ARMATURE_DATA',
@@ -148,10 +139,24 @@ class ASSETMANAGER_UL_list_compact(bpy.types.UIList):
             
             row.label(text=item.name, icon=cat_icon)
             
-            # File size
             size_mb = item.file_size / (1024 * 1024)
             row.label(text=f"{size_mb:.1f}MB")
             
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
             layout.label(text=item.name)
+
+
+# Register
+classes = (
+    ASSETMANAGER_UL_list,
+    ASSETMANAGER_UL_list_compact,
+)
+
+def register():
+    for cls in classes:
+        bpy.utils.register_class(cls)
+
+def unregister():
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)

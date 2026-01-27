@@ -1,3 +1,5 @@
+import bpy
+
 class AssetManagerPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
     

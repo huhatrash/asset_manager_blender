@@ -28,6 +28,14 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
         row.operator("assetmanager.refresh_assets", icon='FILE_REFRESH', text="")
         
         layout.separator()
+
+        # ================= UTILITIES =================
+        utils_box = layout.box()
+        utils_box.label(text="Utilities", icon='TOOL_SETTINGS')
+        
+        row = utils_box.row(align=True)
+        row.operator("assetmanager.show_catalog", icon='WINDOW', text="Catalog View")
+        row.operator("assetmanager.show_statistics", icon='INFO', text="Stats")
         
         # ================= SEARCH & FILTERS =================
         filter_box = layout.box()
@@ -168,10 +176,7 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
             col_right.label(text="Preview disabled", icon='HIDE_ON')
         
         # Preview toggle
-        row = layout.row()
-        row.prop(scene, "show_thumbnail", text="Show Thumbnails", toggle=True)
-        
-        layout.separator()
+        layout.prop(scene, "show_thumbnail")
         
         # ================= ASSET DETAILS =================
         details_box = layout.box()
@@ -276,14 +281,6 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
             row.label(text="Select an asset to enable actions", icon='INFO')
         
         layout.separator()
-        
-        # ================= UTILITIES =================
-        utils_box = layout.box()
-        utils_box.label(text="Utilities", icon='TOOL_SETTINGS')
-        
-        row = utils_box.row(align=True)
-        row.operator("assetmanager.show_catalog", icon='WINDOW', text="Catalog View")
-        row.operator("assetmanager.show_statistics", icon='INFO', text="Stats")
 
 
 # =====================================================

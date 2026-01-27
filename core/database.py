@@ -837,3 +837,147 @@ def db_import_from_json(input_path):
     except Exception as e:
         print(f"[AssetManager] Import failed: {e}")
         return 0
+
+# =====================================================
+# FAVORITES OPERATIONS
+# =====================================================
+
+def db_get_favorites(page=0, page_size=20):
+    """
+    Get paginated favorite assets from database.
+    
+    Args:
+        page (int): Page number (0-indexed)
+        page_size (int): Number of items per page
+        
+    Returns:
+        tuple: (list of favorite assets, total count)
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Get total count of favorites
+        cur.execute("SELECT COUNT(*) FROM assets WHERE is_favorite = 1")
+        total = cur.fetchone()[0]
+        
+        # Get paginated favorites
+        offset = page * page_size
+        cur.execute("""
+            SELECT * FROM assets 
+            WHERE is_favorite = 1
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
+        """, (page_size, offset))
+        
+        rows = [dict(r) for r in cur.fetchall()]
+        
+        return rows, total
+        
+    except Exception as e:
+        print(f"[AssetManager] Error getting favorites: {e}")
+        return [], 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def db_count_favorites():
+    """
+    Get total count of favorite assets.
+    
+    Returns:
+        int: Number of favorite assets
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("SELECT COUNT(*) FROM assets WHERE is_favorite = 1")
+        count = cur.fetchone()[0]
+        return count
+        
+    except Exception as e:
+        print(f"[AssetManager] Error counting favorites: {e}")
+        return 0
+    finally:
+        cur.close()
+        conn.close()
+
+
+def db_toggle_favorite(asset_id):
+    """
+    Toggle favorite status of an asset.
+    
+    Args:
+        asset_id (int): ID of the asset
+        
+    Returns:
+        bool: New favorite status (True if now favorite, False if not)
+        
+    Raises:
+        Exception: If asset not found or database error occurs
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Get current status
+        cur.execute("SELECT is_favorite FROM assets WHERE id = ?", (asset_id,))
+        result = cur.fetchone()
+        
+        if not result:
+            raise ValueError(f"Asset with id {asset_id} not found")
+        
+        current_status = result['is_favorite'] if result['is_favorite'] is not None else 0
+        new_status = 0 if current_status else 1
+        
+        # Update status
+        cur.execute("""
+            UPDATE assets 
+            SET is_favorite = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (new_status, asset_id))
+        
+        conn.commit()
+        return bool(new_status)
+        
+    except Exception as e:
+        conn.rollback()
+        raise Exception(f"Failed to toggle favorite: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+
+def db_add_favorite_column_if_missing():
+    """
+    Add is_favorite column to assets table if it doesn't exist.
+    This should be called during addon initialization.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    try:
+        # Check if column exists
+        cur.execute("PRAGMA table_info(assets)")
+        columns = [column[1] for column in cur.fetchall()]
+        
+        if 'is_favorite' not in columns:
+            cur.execute("ALTER TABLE assets ADD COLUMN is_favorite INTEGER DEFAULT 0")
+            
+            # Create index for performance
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_is_favorite 
+                ON assets(is_favorite)
+            """)
+            
+            conn.commit()
+            print("[AssetManager] Added is_favorite column to assets table")
+            
+    except Exception as e:
+        print(f"[AssetManager] Error adding is_favorite column: {e}")
+        conn.rollback()
+    finally:
+        cur.close()
+        conn.close()
