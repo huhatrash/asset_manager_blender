@@ -106,15 +106,23 @@ def assetmanager_on_load(dummy):
     Loads assets into UI with pagination.
     """
     try:
-        # Get window manager and window
-        wm = bpy.context.window_manager
-        win = bpy.context.window
+        # Safe context access - multiple fallback methods
+        scene = None
         
-        if not win:
-            return
+        # Method 1: Try direct context.scene
+        if hasattr(bpy.context, 'scene') and bpy.context.scene:
+            scene = bpy.context.scene
         
-        scene = win.scene
+        # Method 2: Try context.window.scene
+        elif hasattr(bpy.context, 'window') and bpy.context.window and hasattr(bpy.context.window, 'scene'):
+            scene = bpy.context.window.scene
+        
+        # Method 3: Use first scene from bpy.data
+        elif bpy.data.scenes:
+            scene = bpy.data.scenes[0]
+        
         if not scene:
+            print("[AssetManager] No scene available, skipping asset load")
             return
         
         # Create dummy context
@@ -136,6 +144,15 @@ def assetmanager_on_load(dummy):
         print(f"[AssetManager] Load error: {e}")
         import traceback
         traceback.print_exc()
+
+
+def load_assets_delayed():
+    """Delayed asset loading to ensure context is ready."""
+    try:
+        assetmanager_on_load(None)
+    except Exception as e:
+        print(f"[AssetManager] Delayed load error: {e}")
+    return None  # Don't repeat timer
 
 
 # =====================================================
@@ -162,15 +179,15 @@ def register():
     # Initialize database
     init_db()
     
-    # Load assets immediately
-    try:
-        assetmanager_on_load(None)
-    except Exception as e:
-        print(f"[AssetManager] Initial load failed: {e}")
-    
     # Register handler for file load
     if assetmanager_on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(assetmanager_on_load)
+    
+    # Load assets with delay to avoid context issues
+    try:
+        bpy.app.timers.register(load_assets_delayed, first_interval=0.1)
+    except Exception as e:
+        print(f"[AssetManager] Failed to schedule delayed load: {e}")
     
     print("[AssetManager] Addon registered successfully")
 

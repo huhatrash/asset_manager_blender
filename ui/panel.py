@@ -73,7 +73,7 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
         
         layout.separator()
         
-        # ================= PAGINATION INFO =================
+         # ================= PAGINATION INFO (COLLAPSIBLE) =================
         total = getattr(scene, "asset_total_count", 0)
         current_page = getattr(scene, "asset_current_page", 0)
         total_pages = getattr(scene, "asset_total_pages", 0)
@@ -81,59 +81,80 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
         loaded = len(scene.asset_items)
         
         info_box = layout.box()
-        row = info_box.row()
-        row.label(text=f"Assets: {loaded} of {total:,}", icon='ASSET_MANAGER')
         
-        if total_pages > 1:
-            row = info_box.row(align=True)
-            row.label(text=f"Page {current_page + 1} / {total_pages}")
+        # Toggle header
+        row = info_box.row(align=True)
+        show_pagination = getattr(scene, "show_pagination_info", True)
+        
+        icon = 'TRIA_DOWN' if show_pagination else 'TRIA_RIGHT'
+        row.prop(scene, "show_pagination_info", 
+                 icon=icon, icon_only=True, emboss=False)
+        row.label(text=f"Pagination ({loaded} of {total:,} assets)", icon='ASSET_MANAGER')
+        
+        # Show pagination details if expanded
+        if show_pagination:
+            info_box.separator(factor=0.3)
             
-            # Page size selector
+            if total_pages > 1:
+                row = info_box.row(align=True)
+                row.label(text=f"Page {current_page + 1} / {total_pages}", icon='DOCUMENTS')
+            
+            # Sorting
             row = info_box.row()
-            row.operator("assetmanager.change_page_size", text=f"{page_size} per page", icon='PREFERENCES')
-        
-        # Sorting
-        row = info_box.row()
-        sort_by = getattr(scene, "asset_sort_by", 'created_at')
-        sort_order = getattr(scene, "asset_sort_order", 'DESC')
-        sort_icon = 'SORT_DESC' if sort_order == 'DESC' else 'SORT_ASC'
-        
-        sort_labels = {
-            'created_at': 'Date',
-            'name': 'Name',
-            'category': 'Category',
-            'file_size': 'Size',
-            'poly_count': 'Polys',
-        }
-        sort_text = f"Sort: {sort_labels.get(sort_by, sort_by)}"
-        row.operator("assetmanager.change_sort", text=sort_text, icon=sort_icon)
+            sort_by = getattr(scene, "asset_sort_by", 'created_at')
+            sort_order = getattr(scene, "asset_sort_order", 'DESC')
+            sort_icon = 'SORT_DESC' if sort_order == 'DESC' else 'SORT_ASC'
+            
+            sort_labels = {
+                'created_at': 'Date',
+                'name': 'Name',
+                'category': 'Category',
+                'file_size': 'Size',
+                'poly_count': 'Polys',
+            }
+            sort_text = f"Sort: {sort_labels.get(sort_by, sort_by)}"
+            row.operator("assetmanager.change_sort", text=sort_text, icon=sort_icon)
         
         layout.separator()
         
         # ================= PAGINATION CONTROLS =================
-        if total_pages > 1:
-            nav_box = layout.box()
-            nav_box.label(text="Navigation", icon='SHORTDISPLAY')
-            
-            # First row: First | Previous | Next | Last
-            row = nav_box.row(align=True)
-            row.scale_y = 1.1
-            
-            # First button
-            op = row.operator("assetmanager.first_page", text="", icon='REW')
-            op.enabled = current_page > 0
-            
-            # Previous button
-            op = row.operator("assetmanager.previous_page", text="Prev", icon='TRIA_LEFT')
-            
-            # Page indicator
+        # Always show navigation box
+        nav_box = layout.box()
+        nav_box.label(text="Navigation", icon='SHORTDISPLAY')
+        
+        # Navigation buttons
+        row = nav_box.row(align=True)
+        row.scale_y = 1.2
+        
+        # Disable all if only 1 page
+        row.enabled = (total_pages > 1)
+        
+        # First button
+        row.operator("assetmanager.first_page", text="", icon='REW')
+        
+        # Previous button
+        row.operator("assetmanager.previous_page", text="Prev", icon='TRIA_LEFT')
+        
+        # Page indicator
+        if total_pages > 0:
             row.operator("assetmanager.go_to_page", text=f"{current_page + 1}/{total_pages}")
-            
-            # Next button
-            op = row.operator("assetmanager.next_page", text="Next", icon='TRIA_RIGHT')
-            
-            # Last button
-            op = row.operator("assetmanager.last_page", text="", icon='FF')
+        else:
+            row.operator("assetmanager.go_to_page", text="0/0")
+        
+        # Next button
+        row.operator("assetmanager.next_page", text="Next", icon='TRIA_RIGHT')
+        
+        # Last button
+        row.operator("assetmanager.last_page", text="", icon='FF')
+        
+        # Page size selector - ALWAYS VISIBLE
+        row = nav_box.row()
+        row.operator("assetmanager.change_page_size", text=f"Items per page: {page_size}", icon='PREFERENCES')
+        
+        # Show info if only 1 page
+        if total_pages <= 1:
+            row = nav_box.row()
+            row.label(text="All assets on one page", icon='INFO')
         
         layout.separator()
         
