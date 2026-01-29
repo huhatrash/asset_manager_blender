@@ -197,7 +197,7 @@ def init_scene_properties():
     bpy.types.Scene.asset_page_size = bpy.props.IntProperty(
         name="Page Size",
         description="Number of assets per page",
-        default=50,
+        default=10,
         min=10,
         max=200
     )
@@ -228,6 +228,12 @@ def init_scene_properties():
         description="Display asset thumbnails in preview panel",
         default=True
     )
+
+    bpy.types.Scene.show_pagination_info = bpy.props.BoolProperty(
+    name="Show Pagination Info",
+    description="Display pagination information",
+    default=True
+)
 
 
 # =====================================================
@@ -284,6 +290,7 @@ def clear_scene_properties():
         
         # Display
         "show_thumbnail",
+        "show_pagination_info",
     ]
     
     for prop in props:

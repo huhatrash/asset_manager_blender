@@ -8,7 +8,7 @@ from .preview import load_preview_for_single_asset, unload_preview
 # MAIN LOADING FUNCTION (PAGINATED)
 # =====================================================
 
-def load_assets_to_scene(context, page=0, page_size=50, force_reload=False):
+def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
     """
     Load assets to scene with pagination support.
     
@@ -57,6 +57,7 @@ def load_assets_to_scene(context, page=0, page_size=50, force_reload=False):
     scene.asset_total_pages = (total + page_size - 1) // page_size if total > 0 else 0
     
     # Load assets to scene collection
+    # Load assets to scene collection
     for a in assets:
         item = scene.asset_items.add()
         
@@ -77,15 +78,18 @@ def load_assets_to_scene(context, page=0, page_size=50, force_reload=False):
         item.created_at = a.get("created_at", "")
         item.updated_at = a.get("updated_at", "")
         
-        # Store preview key (don't load preview yet - lazy loading)
-        item.preview_icon = f"asset_{a['uuid']}"
+        # PERBAIKI INI: Simpan thumbnail_path dari database, bukan key
+        item.preview_icon = a.get("thumbnail_path", "")  # Path thumbnail dari DB
     
     # Reset selection to first item
     if len(scene.asset_items) > 0:
         scene.asset_index = 0
-    
-    return len(scene.asset_items)
 
+    # PRE-LOAD previews untuk assets yang baru dimuat
+    from .preview import load_previews_for_assets
+    load_previews_for_assets(assets)  # assets sudah berisi data dari db_get_paginated
+
+    return len(scene.asset_items)
 
 # =====================================================
 # ADVANCED SEARCH & FILTER
@@ -145,7 +149,7 @@ def load_assets_with_filters(context):
         item.faces = a.get("faces", 0)
         item.created_at = a.get("created_at", "")
         item.updated_at = a.get("updated_at", "")
-        item.preview_icon = f"asset_{a['uuid']}"
+        item.preview_icon = a.get("thumbnail_path", "") 
     
     if len(scene.asset_items) > 0:
         scene.asset_index = 0
@@ -191,7 +195,7 @@ def update_single_asset_in_scene(context, asset_id):
             item.vertices = updated.get("vertices", 0)
             item.faces = updated.get("faces", 0)
             item.updated_at = updated.get("updated_at", "")
-            item.preview_icon = f"asset_{updated['uuid']}"
+            item.preview_icon = updated.get("thumbnail_path", "") 
             
             found = True
             break
@@ -234,7 +238,7 @@ def add_single_asset_to_scene(context, asset_id):
     item.faces = asset.get("faces", 0)
     item.created_at = asset.get("created_at", "")
     item.updated_at = asset.get("updated_at", "")
-    item.preview_icon = f"asset_{asset['uuid']}"
+    item.preview_icon = asset.get("thumbnail_path", "")
     
     # Move to top (most recent)
     # Since we can't reorder, just reload the page
@@ -300,7 +304,7 @@ def go_to_page(context, page):
     if page < 0 or (total_pages > 0 and page >= total_pages):
         return False
     
-    page_size = getattr(scene, "asset_page_size", 50)
+    page_size = getattr(scene, "asset_page_size", 10)
     load_assets_to_scene(context, page=page, page_size=page_size, force_reload=True)
     
     return True
@@ -356,7 +360,7 @@ def refresh_current_page(context):
     """
     scene = context.scene
     current_page = getattr(scene, "asset_current_page", 0)
-    page_size = getattr(scene, "asset_page_size", 50)
+    page_size = getattr(scene, "asset_page_size", 10)
     
     load_assets_to_scene(context, page=current_page, page_size=page_size, force_reload=True)
 
@@ -399,7 +403,7 @@ def on_filter_changed(context):
         load_assets_with_filters(context)
     else:
         # Use regular pagination
-        page_size = getattr(scene, "asset_page_size", 50)
+        page_size = getattr(scene, "asset_page_size", 10)
         load_assets_to_scene(context, page=0, page_size=page_size, force_reload=True)
 
 
@@ -519,7 +523,7 @@ def get_pagination_info(context):
     return {
         'current_page': getattr(scene, "asset_current_page", 0),
         'total_pages': getattr(scene, "asset_total_pages", 0),
-        'page_size': getattr(scene, "asset_page_size", 50),
+        'page_size': getattr(scene, "asset_page_size", 10),
         'total_count': getattr(scene, "asset_total_count", 0),
         'loaded_count': len(scene.asset_items) if hasattr(scene, "asset_items") else 0,
     }

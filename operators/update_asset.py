@@ -1,11 +1,3 @@
-"""
-Update Asset Operator - Asset Manager
-Handles updating existing assets.
-
-Author: alfa haliza
-Version: 2.0 (Fixed)
-"""
-
 import bpy
 import os
 
@@ -14,7 +6,7 @@ from ..core.export_import import export_selected_with_textures
 from ..core.thumbnail import render_thumbnail_for_object, regenerate_thumbnail
 from ..core.paths import get_exports_dir
 from ..core.scene_assets import update_single_asset_in_scene
-from ..core.preview import reload_preview
+from ..core.preview import reload_preview, unload_preview, load_preview_for_single_asset
 
 
 class ASSETMANAGER_OT_update(bpy.types.Operator):
@@ -169,9 +161,6 @@ class ASSETMANAGER_OT_update(bpy.types.Operator):
                 
                 if new_thumb_path:
                     update_data['thumbnail_path'] = new_thumb_path
-                    
-                    # Reload preview in UI
-                    reload_preview(asset)
                 else:
                     self.report({'WARNING'}, "Thumbnail generation failed, keeping old thumbnail")
             
@@ -181,12 +170,41 @@ class ASSETMANAGER_OT_update(bpy.types.Operator):
             if not success:
                 raise RuntimeError("Database update failed")
             
-            # Update UI
+            # ✅ CRITICAL: FORCE RELOAD PREVIEW
+            if self.update_thumbnail:
+                # Step 1: Unload preview lama dari memory
+                asset_uuid = asset.get('uuid')
+                if asset_uuid:
+                    unload_preview(asset_uuid)
+                    print(f"[AssetManager] Unloaded old preview for {asset_uuid}")
+                
+                # Step 2: Get updated asset data dari database
+                updated_asset = db_get_by_id(self.asset_id)
+                if updated_asset:
+                    # Step 3: Load preview baru dengan path yang updated
+                    preview = load_preview_for_single_asset(updated_asset)
+                    if preview:
+                        print(f"[AssetManager] Reloaded preview successfully")
+                    else:
+                        print(f"[AssetManager] Failed to reload preview")
+            
+            # ✅ UPDATE UI LIST - Update item properties di scene
             update_single_asset_in_scene(context, self.asset_id)
             
-            # Refresh area
+            # ✅ FORCE REDRAW ALL RELEVANT AREAS
+            # Redraw semua VIEW_3D areas untuk refresh UI list dan preview
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+                    for region in area.regions:
+                        region.tag_redraw()
+            
+            # Redraw current area juga
             if context.area:
                 context.area.tag_redraw()
+            
+            # ✅ TRIGGER UI UPDATE dengan timer (kadang perlu delay)
+            bpy.app.timers.register(lambda: self._delayed_refresh(context), first_interval=0.1)
             
             self.report({'INFO'}, f"Asset '{self.name}' updated successfully")
             return {'FINISHED'}
@@ -204,6 +222,24 @@ class ASSETMANAGER_OT_update(bpy.types.Operator):
     # =====================================================
     # HELPER METHODS
     # =====================================================
+
+    def _delayed_refresh(self, context):
+        """Delayed refresh untuk memastikan UI ter-update"""
+        try:
+            # Force redraw sekali lagi setelah delay
+            for area in context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+            
+            if context.area:
+                context.area.tag_redraw()
+                
+            print("[AssetManager] Delayed refresh completed")
+        except Exception as e:
+            print(f"[AssetManager] Delayed refresh error: {e}")
+        
+        # Return None untuk stop timer (one-shot)
+        return None
 
     def _update_asset_file(self, obj, asset):
         """
@@ -274,6 +310,7 @@ class ASSETMANAGER_OT_update(bpy.types.Operator):
         if os.path.exists(thumbnail_path):
             try:
                 os.remove(thumbnail_path)
+                print(f"[AssetManager] Deleted old thumbnail: {thumbnail_path}")
             except Exception as e:
                 print(f"[AssetManager] Failed to delete old thumbnail: {e}")
         
@@ -286,6 +323,7 @@ class ASSETMANAGER_OT_update(bpy.types.Operator):
         )
         
         if success and os.path.exists(thumbnail_path):
+            print(f"[AssetManager] New thumbnail created: {thumbnail_path}")
             return thumbnail_path
         
         return None

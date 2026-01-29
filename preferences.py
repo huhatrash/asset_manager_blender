@@ -6,7 +6,7 @@ class AssetManagerPreferences(bpy.types.AddonPreferences):
     page_size: bpy.props.IntProperty(
         name="Assets Per Page",
         description="Number of assets to load at once",
-        default=50,
+        default=10,
         min=10,
         max=200
     )

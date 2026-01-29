@@ -1,6 +1,7 @@
 import bpy
-from ..core.database import db_get_all
-from ..core.preview import load_previews_for_assets
+from ..core.database import db_get_paginated
+from ..core.preview import load_preview_for_single_asset
+from ..core.preview import get_preview_collection
 
 
 class ASSETMANAGER_PT_panel(bpy.types.Panel):
@@ -77,7 +78,7 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
         total = getattr(scene, "asset_total_count", 0)
         current_page = getattr(scene, "asset_current_page", 0)
         total_pages = getattr(scene, "asset_total_pages", 0)
-        page_size = getattr(scene, "asset_page_size", 50)
+        page_size = getattr(scene, "asset_page_size", 10)
         loaded = len(scene.asset_items)
         
         info_box = layout.box()
@@ -171,33 +172,35 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
             "asset_items",
             scene,
             "asset_index",
-            rows=10
+            rows=8
         )
         
         # RIGHT: Preview
         col_right = split.column()
         col_right.label(text="Preview", icon='IMAGE_DATA')
-        
+
         if scene.show_thumbnail:
             idx = scene.asset_index
             if 0 <= idx < len(scene.asset_items):
                 item = scene.asset_items[idx]
-                previews = load_previews_for_assets(db_get_all())
                 
-                if previews and item.preview_icon in previews:
+                # Gunakan key yang sudah di-load
+                preview_key = f"asset_{item.uuid}"
+                pcoll = get_preview_collection()
+                
+                if preview_key in pcoll:
                     col_right.template_icon(
-                        icon_value=previews[item.preview_icon].icon_id,
-                        scale=6
+                        icon_value=pcoll[preview_key].icon_id,
+                        scale=8
                     )
                 else:
-                    col_right.label(text="No Preview", icon='ERROR')
+                    col_right.label(text="No Preview", icon='INFO')
             else:
                 col_right.label(text="No Selection", icon='INFO')
         else:
             col_right.label(text="Preview disabled", icon='HIDE_ON')
-        
-        # Preview toggle
-        layout.prop(scene, "show_thumbnail")
+
+        col_right.prop(scene, "show_thumbnail")
         
         # ================= ASSET DETAILS =================
         details_box = layout.box()

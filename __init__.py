@@ -133,7 +133,7 @@ def assetmanager_on_load(dummy):
         ctx.scene = scene
         
         # Get page size from preferences or use default
-        page_size = getattr(scene, "asset_page_size", 50)
+        page_size = getattr(scene, "asset_page_size", 10)
         
         # Load first page of assets
         load_assets_to_scene(ctx, page=0, page_size=page_size, force_reload=True)
@@ -144,7 +144,6 @@ def assetmanager_on_load(dummy):
         print(f"[AssetManager] Load error: {e}")
         import traceback
         traceback.print_exc()
-
 
 def load_assets_delayed():
     """Delayed asset loading to ensure context is ready."""

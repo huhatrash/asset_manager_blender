@@ -15,19 +15,19 @@ def get_connection():
     Returns:
         sqlite3.Connection: Configured database connection
     """
-    conn = sqlite3.connect(DB_PATH, timeout=30)  # Increased timeout for large operations
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     
     # ✅ AGGRESSIVE PERFORMANCE OPTIMIZATIONS
-    conn.execute("PRAGMA journal_mode=WAL;")        # Write-Ahead Logging (concurrent reads)
-    conn.execute("PRAGMA synchronous=NORMAL;")      # Balance safety vs speed
-    conn.execute("PRAGMA foreign_keys=ON;")         # Enforce constraints
-    conn.execute("PRAGMA cache_size=-128000;")      # 128MB cache (increased from 64MB)
-    conn.execute("PRAGMA page_size=4096;")          # Optimal page size
-    conn.execute("PRAGMA temp_store=MEMORY;")       # Store temp tables in RAM
-    conn.execute("PRAGMA mmap_size=268435456;")     # 256MB memory-mapped I/O
-    conn.execute("PRAGMA locking_mode=NORMAL;")     # Allow concurrent access
-    conn.execute("PRAGMA auto_vacuum=INCREMENTAL;") # Prevent database bloat
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA cache_size=-128000;")
+    conn.execute("PRAGMA page_size=4096;")
+    conn.execute("PRAGMA temp_store=MEMORY;")
+    conn.execute("PRAGMA mmap_size=268435456;")
+    conn.execute("PRAGMA locking_mode=NORMAL;")
+    conn.execute("PRAGMA auto_vacuum=INCREMENTAL;")
     
     return conn
 
@@ -62,8 +62,10 @@ def init_db():
         vertices INTEGER DEFAULT 0,
         faces INTEGER DEFAULT 0,
 
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        
+        is_favorite INTEGER DEFAULT 0
     );
     """)
 
@@ -105,33 +107,33 @@ def init_db():
         ON assets(uuid);
     """)
     
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_is_favorite 
+        ON assets(is_favorite, updated_at DESC);
+    """)
+    
     # ✅ COMPOSITE INDEXES FOR COMMON QUERY PATTERNS
     
-    # Category + Created (for filtered listings)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_category_created 
         ON assets(category, created_at DESC);
     """)
     
-    # Category + Updated (for filtered recent updates)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_category_updated 
         ON assets(category, updated_at DESC);
     """)
     
-    # File size range queries
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_file_size_range 
         ON assets(file_size, created_at DESC);
     """)
     
-    # Poly count range queries
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_poly_range 
         ON assets(poly_count, created_at DESC);
     """)
     
-    # ✅ FULL-TEXT SEARCH INDEX (for name/description)
     cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_name_search 
         ON assets(name COLLATE NOCASE, description COLLATE NOCASE);
@@ -140,9 +142,6 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
-    
-    # Initialize favorites column
-    db_add_favorite_column_if_missing()
 
 
 def create_table_if_not_exists():
@@ -169,36 +168,55 @@ def db_insert_or_update_by_uuid(
     """
     Insert new asset or update existing one by UUID.
     Uses UPSERT for better performance.
+    
+    ✅ FIXED: Properly handles created_at and updated_at timestamps
     """
     conn = get_connection()
     cur = conn.cursor()
 
-    # ✅ Use UPSERT (INSERT OR REPLACE) - faster than SELECT + UPDATE/INSERT
-    cur.execute("""
-        INSERT INTO assets (
-            uuid, name, category, description,
+    # ✅ PERBAIKAN: Cek apakah asset sudah ada
+    cur.execute("SELECT id, created_at FROM assets WHERE uuid = ?", (uuid,))
+    existing = cur.fetchone()
+    
+    if existing:
+        # UPDATE - Keep original created_at, update updated_at
+        cur.execute("""
+            UPDATE assets SET
+                name=?,
+                category=?,
+                description=?,
+                file_path=?,
+                thumbnail_path=?,
+                file_size=?,
+                poly_count=?,
+                vertices=?,
+                faces=?,
+                updated_at=datetime('now', 'localtime')
+            WHERE uuid=?
+        """, (
+            name, category, description,
             file_path, thumbnail_path,
             file_size, poly_count, vertices, faces,
-            created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ON CONFLICT(uuid) DO UPDATE SET
-            name=excluded.name,
-            category=excluded.category,
-            description=excluded.description,
-            file_path=excluded.file_path,
-            thumbnail_path=excluded.thumbnail_path,
-            file_size=excluded.file_size,
-            poly_count=excluded.poly_count,
-            vertices=excluded.vertices,
-            faces=excluded.faces,
-            updated_at=CURRENT_TIMESTAMP
-    """, (
-        uuid, name, category, description,
-        file_path, thumbnail_path,
-        file_size, poly_count, vertices, faces
-    ))
-    
-    inserted = cur.rowcount == 1
+            uuid
+        ))
+        inserted = False
+    else:
+        # INSERT - Set both created_at and updated_at
+        cur.execute("""
+            INSERT INTO assets (
+                uuid, name, category, description,
+                file_path, thumbnail_path,
+                file_size, poly_count, vertices, faces,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                      datetime('now', 'localtime'), 
+                      datetime('now', 'localtime'))
+        """, (
+            uuid, name, category, description,
+            file_path, thumbnail_path,
+            file_size, poly_count, vertices, faces
+        ))
+        inserted = True
 
     conn.commit()
     cur.close()
@@ -225,16 +243,17 @@ def db_batch_insert_optimized(assets_data):
     cur = conn.cursor()
     
     try:
-        # ✅ Single transaction for all inserts
         cur.execute("BEGIN TRANSACTION")
         
-        # ✅ Use executemany with prepared statement
         cur.executemany("""
             INSERT OR IGNORE INTO assets (
                 uuid, name, category, description,
                 file_path, thumbnail_path,
-                file_size, poly_count, vertices, faces
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                file_size, poly_count, vertices, faces,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                      datetime('now', 'localtime'),
+                      datetime('now', 'localtime'))
         """, assets_data)
         
         count = cur.rowcount
@@ -256,7 +275,7 @@ def db_batch_insert_optimized(assets_data):
 # READ OPERATIONS (HIGHLY OPTIMIZED)
 # =====================================================
 
-def db_get_paginated(page=0, page_size=50, category='ALL', search='', 
+def db_get_paginated(page=0, page_size=10, category='ALL', search='', 
                      sort_by='created_at', sort_order='DESC',
                      min_size=0, max_size=0, min_poly=0, max_poly=0):
     """
@@ -269,23 +288,18 @@ def db_get_paginated(page=0, page_size=50, category='ALL', search='',
     conn = get_connection()
     cur = conn.cursor()
     
-    # ✅ Build optimized WHERE clause
     where_clauses = []
     params = []
     
-    # Category filter
     if category and category != 'ALL':
         where_clauses.append("category = ?")
         params.append(category)
     
-    # Search filter (optimized with LIKE)
     if search and search.strip():
-        # Use index-friendly LIKE with leading %
         where_clauses.append("(name LIKE ? OR description LIKE ?)")
         search_term = f"%{search.strip()}%"
         params.extend([search_term, search_term])
     
-    # File size filters
     if min_size > 0:
         where_clauses.append("file_size >= ?")
         params.append(min_size * 1024)
@@ -294,7 +308,6 @@ def db_get_paginated(page=0, page_size=50, category='ALL', search='',
         where_clauses.append("file_size <= ?")
         params.append(max_size * 1024)
     
-    # Polygon count filters
     if min_poly > 0:
         where_clauses.append("poly_count >= ?")
         params.append(min_poly)
@@ -305,13 +318,10 @@ def db_get_paginated(page=0, page_size=50, category='ALL', search='',
     
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
     
-    # ✅ Get total count (with same filters)
     count_query = f"SELECT COUNT(*) FROM assets WHERE {where_sql}"
     cur.execute(count_query, params)
     total = cur.fetchone()[0]
     
-    # ✅ Validate and optimize sort
-    # Use composite indexes when possible
     valid_sort_columns = {
         'created_at': 'created_at',
         'updated_at': 'updated_at',
@@ -324,26 +334,14 @@ def db_get_paginated(page=0, page_size=50, category='ALL', search='',
     sort_column = valid_sort_columns.get(sort_by, 'created_at')
     sort_order = 'DESC' if sort_order.upper() == 'DESC' else 'ASC'
     
-    # ✅ Paginated query with LIMIT/OFFSET
     offset = page * page_size
     
-    # Use composite index when filtering by category
-    if category and category != 'ALL':
-        # This will use idx_category_created or idx_category_updated
-        query = f"""
-            SELECT * FROM assets 
-            WHERE {where_sql}
-            ORDER BY {sort_column} {sort_order}
-            LIMIT ? OFFSET ?
-        """
-    else:
-        # Use single column index
-        query = f"""
-            SELECT * FROM assets 
-            WHERE {where_sql}
-            ORDER BY {sort_column} {sort_order}
-            LIMIT ? OFFSET ?
-        """
+    query = f"""
+        SELECT * FROM assets 
+        WHERE {where_sql}
+        ORDER BY {sort_column} {sort_order}
+        LIMIT ? OFFSET ?
+    """
     
     cur.execute(query, params + [page_size, offset])
     rows = [dict(r) for r in cur.fetchall()]
@@ -355,13 +353,10 @@ def db_get_paginated(page=0, page_size=50, category='ALL', search='',
 
 
 def db_get_by_id(asset_id):
-    """
-    Optimized single asset fetch by ID (uses PRIMARY KEY index).
-    """
+    """Optimized single asset fetch by ID (uses PRIMARY KEY index)."""
     conn = get_connection()
     cur = conn.cursor()
     
-    # ✅ Use prepared statement with PRIMARY KEY
     cur.execute("SELECT * FROM assets WHERE id = ? LIMIT 1", (asset_id,))
     row = cur.fetchone()
     
@@ -372,13 +367,10 @@ def db_get_by_id(asset_id):
 
 
 def db_get_by_uuid(uuid):
-    """
-    Optimized single asset fetch by UUID (uses UNIQUE index).
-    """
+    """Optimized single asset fetch by UUID (uses UNIQUE index)."""
     conn = get_connection()
     cur = conn.cursor()
     
-    # ✅ Use UUID index
     cur.execute("SELECT * FROM assets WHERE uuid = ? LIMIT 1", (uuid,))
     row = cur.fetchone()
     
@@ -388,23 +380,30 @@ def db_get_by_uuid(uuid):
     return dict(row) if row else None
 
 
+def db_get_all():
+    """
+    Get all assets (DEPRECATED - use db_get_paginated instead).
+    
+    Warning: This loads all assets at once. Not recommended for 1000+ assets.
+    Use db_get_paginated() for better performance.
+    
+    Returns:
+        list: List of asset dictionaries
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM assets ORDER BY created_at DESC")
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return rows
+
+
 def db_search_assets(search_term='', category='ALL', min_size=0, max_size=0, 
                      min_poly=0, max_poly=0, limit=100):
     """
     Advanced search with multiple filters.
     DEPRECATED: Use db_get_paginated() instead for better performance.
-    
-    Args:
-        search_term (str): Search in name/description
-        category (str): Filter by category
-        min_size (int): Minimum file size in KB
-        max_size (int): Maximum file size in KB
-        min_poly (int): Minimum polygon count
-        max_poly (int): Maximum polygon count
-        limit (int): Maximum results to return
-    
-    Returns:
-        list: List of matching asset dictionaries
     """
     conn = get_connection()
     cur = conn.cursor()
@@ -412,18 +411,15 @@ def db_search_assets(search_term='', category='ALL', min_size=0, max_size=0,
     where = []
     params = []
     
-    # Category filter
     if category and category != 'ALL':
         where.append("category = ?")
         params.append(category)
     
-    # Text search
     if search_term and search_term.strip():
         where.append("(name LIKE ? OR description LIKE ?)")
         term = f"%{search_term.strip()}%"
         params.extend([term, term])
     
-    # File size filters
     if min_size > 0:
         where.append("file_size >= ?")
         params.append(min_size * 1024)
@@ -432,7 +428,6 @@ def db_search_assets(search_term='', category='ALL', min_size=0, max_size=0,
         where.append("file_size <= ?")
         params.append(max_size * 1024)
     
-    # Polygon count filters
     if min_poly > 0:
         where.append("poly_count >= ?")
         params.append(min_poly)
@@ -457,70 +452,6 @@ def db_search_assets(search_term='', category='ALL', min_size=0, max_size=0,
     return rows
 
 
-def db_get_all():
-    """
-    Get all assets (DEPRECATED - use db_get_paginated instead).
-    
-    Warning: This loads all assets at once. Not recommended for 1000+ assets.
-    Use db_get_paginated() for better performance.
-    
-    Returns:
-        list: List of asset dictionaries
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM assets ORDER BY created_at DESC")
-    rows = [dict(r) for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return rows
-
-
-def db_get_multiple_by_ids(asset_ids):
-    """
-    Get multiple assets by IDs in a single query.
-    
-    Args:
-        asset_ids (list): List of asset IDs
-    
-    Returns:
-        list: List of asset dictionaries
-    """
-    if not asset_ids:
-        return []
-    
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    placeholders = ','.join('?' * len(asset_ids))
-    cur.execute(f"SELECT * FROM assets WHERE id IN ({placeholders})", asset_ids)
-    
-    rows = [dict(r) for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-    
-    return rows
-
-
-def db_get_categories():
-    """
-    Get list of all unique categories in database.
-    
-    Returns:
-        list: List of category names
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    cur.execute("SELECT DISTINCT category FROM assets ORDER BY category")
-    categories = [row['category'] for row in cur.fetchall()]
-    
-    cur.close()
-    conn.close()
-    
-    return categories
-
-
 # =====================================================
 # UPDATE & DELETE OPERATIONS
 # =====================================================
@@ -542,7 +473,6 @@ def db_update_asset(asset_id, **kwargs):
     conn = get_connection()
     cur = conn.cursor()
     
-    # Build UPDATE query dynamically
     fields = []
     values = []
     
@@ -558,8 +488,7 @@ def db_update_asset(asset_id, **kwargs):
         conn.close()
         return False
     
-    # Always update timestamp
-    fields.append("updated_at=CURRENT_TIMESTAMP")
+    fields.append("updated_at=datetime('now', 'localtime')")
     
     query = f"UPDATE assets SET {', '.join(fields)} WHERE id=?"
     values.append(asset_id)
@@ -575,15 +504,7 @@ def db_update_asset(asset_id, **kwargs):
 
 
 def db_delete_by_id(asset_id):
-    """
-    Delete asset by ID.
-    
-    Args:
-        asset_id (int): Asset ID to delete
-    
-    Returns:
-        bool: True if deleted, False if not found
-    """
+    """Delete asset by ID."""
     conn = get_connection()
     cur = conn.cursor()
 
@@ -598,15 +519,7 @@ def db_delete_by_id(asset_id):
 
 
 def db_delete_by_uuid(uuid):
-    """
-    Delete asset by UUID.
-    
-    Args:
-        uuid (str): Asset UUID to delete
-    
-    Returns:
-        bool: True if deleted, False if not found
-    """
+    """Delete asset by UUID."""
     conn = get_connection()
     cur = conn.cursor()
 
@@ -620,202 +533,17 @@ def db_delete_by_uuid(uuid):
     return deleted
 
 
-def db_batch_delete(asset_ids):
-    """
-    Delete multiple assets in a single transaction.
-    
-    Args:
-        asset_ids (list): List of asset IDs to delete
-    
-    Returns:
-        int: Number of assets deleted
-    """
-    if not asset_ids:
-        return 0
-    
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    placeholders = ','.join('?' * len(asset_ids))
-    cur.execute(f"DELETE FROM assets WHERE id IN ({placeholders})", asset_ids)
-    
-    count = cur.rowcount
-    conn.commit()
-    cur.close()
-    conn.close()
-    
-    return count
-
-
-def db_cleanup_orphaned_records():
-    """
-    Clean up records where files no longer exist.
-    
-    Returns:
-        int: Number of records cleaned up
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    cur.execute("SELECT id, file_path FROM assets")
-    all_assets = cur.fetchall()
-    
-    orphaned_ids = []
-    for asset in all_assets:
-        if not os.path.exists(asset['file_path']):
-            orphaned_ids.append(asset['id'])
-    
-    if orphaned_ids:
-        placeholders = ','.join('?' * len(orphaned_ids))
-        cur.execute(f"DELETE FROM assets WHERE id IN ({placeholders})", orphaned_ids)
-        conn.commit()
-    
-    count = len(orphaned_ids)
-    cur.close()
-    conn.close()
-    
-    return count
-
-
 # =====================================================
-# BACKUP & EXPORT
-# =====================================================
-
-def db_backup(backup_path):
-    """
-    Create a backup of the database.
-    
-    Args:
-        backup_path (str): Path where backup will be saved
-    
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    try:
-        import shutil
-        shutil.copy2(DB_PATH, backup_path)
-        return True
-    except Exception as e:
-        print(f"[AssetManager] Backup failed: {e}")
-        return False
-
-
-def db_check_integrity():
-    """
-    Check database integrity.
-    
-    Returns:
-        bool: True if integrity check passes, False otherwise
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    cur.execute("PRAGMA integrity_check")
-    result = cur.fetchone()[0]
-    
-    cur.close()
-    conn.close()
-    
-    return result == "ok"
-
-
-def db_export_to_json(output_path):
-    """
-    Export all assets to JSON file.
-    
-    Args:
-        output_path (str): Path to output JSON file
-    
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    try:
-        import json
-        
-        assets = db_get_all()
-        
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(assets, f, indent=2, ensure_ascii=False)
-        
-        return True
-    except Exception as e:
-        print(f"[AssetManager] Export failed: {e}")
-        return False
-
-
-def db_import_from_json(input_path):
-    """
-    Import assets from JSON file.
-    
-    Args:
-        input_path (str): Path to input JSON file
-    
-    Returns:
-        int: Number of assets imported
-    """
-    try:
-        import json
-        
-        with open(input_path, 'r', encoding='utf-8') as f:
-            assets = json.load(f)
-        
-        conn = get_connection()
-        cur = conn.cursor()
-        
-        count = 0
-        for asset in assets:
-            try:
-                cur.execute("""
-                    INSERT OR IGNORE INTO assets (
-                        uuid, name, category, description,
-                        file_path, thumbnail_path,
-                        file_size, poly_count, vertices, faces,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    asset.get('uuid'),
-                    asset.get('name'),
-                    asset.get('category'),
-                    asset.get('description'),
-                    asset.get('file_path'),
-                    asset.get('thumbnail_path'),
-                    asset.get('file_size', 0),
-                    asset.get('poly_count', 0),
-                    asset.get('vertices', 0),
-                    asset.get('faces', 0),
-                    asset.get('created_at'),
-                    asset.get('updated_at')
-                ))
-                if cur.rowcount > 0:
-                    count += 1
-            except Exception as e:
-                print(f"[AssetManager] Failed to import asset {asset.get('name')}: {e}")
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        return count
-        
-    except Exception as e:
-        print(f"[AssetManager] Import failed: {e}")
-        return 0
-
-
-# =====================================================
-# STATISTICS (OPTIMIZED AGGREGATIONS)
+# STATISTICS & MAINTENANCE
 # =====================================================
 
 def db_get_statistics():
-    """
-    Optimized statistics with single query using subqueries.
-    """
+    """Optimized statistics with single query using subqueries."""
     conn = get_connection()
     cur = conn.cursor()
     
     stats = {}
     
-    # ✅ Single query for all basic stats
     cur.execute("""
         SELECT 
             COUNT(*) as total,
@@ -845,7 +573,6 @@ def db_get_statistics():
         'max': row['max_polys'] or 0,
     }
     
-    # ✅ Category stats with GROUP BY (uses idx_category)
     cur.execute("""
         SELECT category, COUNT(*) as count 
         FROM assets 
@@ -860,10 +587,6 @@ def db_get_statistics():
     return stats
 
 
-# =====================================================
-# MAINTENANCE (OPTIMIZED)
-# =====================================================
-
 def db_optimize():
     """
     Comprehensive database optimization.
@@ -874,19 +597,15 @@ def db_optimize():
     print("[AssetManager] Starting database optimization...")
     
     try:
-        # ✅ Rebuild indexes for optimal performance
         conn.execute("REINDEX")
         print("[AssetManager] Indexes rebuilt")
         
-        # ✅ Update query planner statistics
         conn.execute("ANALYZE")
         print("[AssetManager] Statistics updated")
         
-        # ✅ Reclaim unused space
         conn.execute("VACUUM")
         print("[AssetManager] Database vacuumed")
         
-        # ✅ Incremental vacuum for auto_vacuum
         conn.execute("PRAGMA incremental_vacuum")
         print("[AssetManager] Incremental vacuum completed")
         
@@ -898,55 +617,16 @@ def db_optimize():
         conn.close()
 
 
-def db_get_size():
-    """Get database file size in MB."""
-    if os.path.exists(DB_PATH):
-        size_bytes = os.path.getsize(DB_PATH)
-        size_mb = size_bytes / (1024 * 1024)
-        return size_mb
-    return 0
-
-
 # =====================================================
-# FAVORITES OPERATIONS (OPTIMIZED)
+# FAVORITES OPERATIONS
 # =====================================================
-
-def db_add_favorite_column_if_missing():
-    """Add is_favorite column with index."""
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("PRAGMA table_info(assets)")
-        columns = [column[1] for column in cur.fetchall()]
-        
-        if 'is_favorite' not in columns:
-            cur.execute("ALTER TABLE assets ADD COLUMN is_favorite INTEGER DEFAULT 0")
-            
-            # ✅ Create index for favorites
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_is_favorite 
-                ON assets(is_favorite, updated_at DESC)
-            """)
-            
-            conn.commit()
-            print("[AssetManager] Added is_favorite column with index")
-            
-    except Exception as e:
-        print(f"[AssetManager] Error adding is_favorite column: {e}")
-        conn.rollback()
-    finally:
-        cur.close()
-        conn.close()
-
 
 def db_get_favorites(page=0, page_size=20):
-    """Get paginated favorites (uses idx_is_favorite)."""
+    """Get paginated favorites."""
     conn = get_connection()
     cur = conn.cursor()
     
     try:
-        # ✅ Use composite index idx_is_favorite
         cur.execute("SELECT COUNT(*) FROM assets WHERE is_favorite = 1")
         total = cur.fetchone()[0]
         
@@ -969,25 +649,8 @@ def db_get_favorites(page=0, page_size=20):
         conn.close()
 
 
-def db_count_favorites():
-    """Count favorites (uses idx_is_favorite)."""
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("SELECT COUNT(*) FROM assets WHERE is_favorite = 1")
-        count = cur.fetchone()[0]
-        return count
-    except Exception as e:
-        print(f"[AssetManager] Error counting favorites: {e}")
-        return 0
-    finally:
-        cur.close()
-        conn.close()
-
-
 def db_toggle_favorite(asset_id):
-    """Toggle favorite status (uses PRIMARY KEY index)."""
+    """Toggle favorite status."""
     conn = get_connection()
     cur = conn.cursor()
     
@@ -1003,7 +666,7 @@ def db_toggle_favorite(asset_id):
         
         cur.execute("""
             UPDATE assets 
-            SET is_favorite = ?, updated_at = CURRENT_TIMESTAMP
+            SET is_favorite = ?, updated_at = datetime('now', 'localtime')
             WHERE id = ?
         """, (new_status, asset_id))
         
@@ -1016,41 +679,3 @@ def db_toggle_favorite(asset_id):
     finally:
         cur.close()
         conn.close()
-
-
-# =====================================================
-# PERFORMANCE MONITORING
-# =====================================================
-
-def db_analyze_query_performance():
-    """
-    Analyze query performance and suggest optimizations.
-    Run this to identify slow queries.
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    
-    print("[AssetManager] Query Performance Analysis:")
-    print("=" * 50)
-    
-    # Check index usage
-    cur.execute("PRAGMA index_list('assets')")
-    indexes = cur.fetchall()
-    print(f"\nTotal indexes: {len(indexes)}")
-    
-    # Check database stats
-    cur.execute("PRAGMA page_count")
-    page_count = cur.fetchone()[0]
-    
-    cur.execute("PRAGMA page_size")
-    page_size = cur.fetchone()[0]
-    
-    db_size_mb = (page_count * page_size) / (1024 * 1024)
-    print(f"Database size: {db_size_mb:.2f} MB")
-    
-    # Suggest optimization if needed
-    if db_size_mb > 100:
-        print("\n⚠️  Large database detected. Consider running db_optimize()")
-    
-    cur.close()
-    conn.close()

@@ -1,10 +1,3 @@
-"""
-UIList - Asset Manager
-Custom UI list with SMALLER preview icons.
-
-Author: alfa haliza
-Version: 2.2 (Fixed Icon Size)
-"""
 
 import bpy
 import os
@@ -85,33 +78,33 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             if not pcoll:
                 return 0
             
-            # Check preview key
-            preview_key = item.preview_icon if item.preview_icon else f"asset_{item.uuid}"
+            # Gunakan UUID sebagai key
+            preview_key = f"asset_{item.uuid}"
             
-            # Jika sudah ada di cache
+            # Jika sudah ada di cache, langsung return
             if preview_key in pcoll:
                 return pcoll[preview_key].icon_id
             
-            # ✅ LOAD ON-DEMAND dari thumbnail file
-            asset_data = db_get_by_id(item.id)
-            if not asset_data:
-                return 0
-            
-            thumbnail_path = asset_data.get('thumbnail_path')
-            if thumbnail_path and os.path.exists(thumbnail_path):
-                # Load ke preview collection
+            # ✅ LOAD ON-DEMAND dari thumbnail path yang sudah ada di item
+            if item.preview_icon and os.path.exists(item.preview_icon):
                 try:
-                    preview = pcoll.load(preview_key, thumbnail_path, 'IMAGE')
+                    preview = pcoll.load(preview_key, item.preview_icon, 'IMAGE')
                     if preview:
-                        item.preview_icon = preview_key
                         return preview.icon_id
                 except Exception as e:
                     print(f"[AssetManager] Failed to load preview: {e}")
             
-            # Fallback
-            preview = load_preview_for_single_asset(asset_data)
-            if preview:
-                return preview.icon_id
+            # Fallback: coba ambil dari database
+            asset_data = db_get_by_id(item.id)
+            if asset_data:
+                thumbnail_path = asset_data.get('thumbnail_path')
+                if thumbnail_path and os.path.exists(thumbnail_path):
+                    try:
+                        preview = pcoll.load(preview_key, thumbnail_path, 'IMAGE')
+                        if preview:
+                            return preview.icon_id
+                    except Exception as e:
+                        print(f"[AssetManager] Failed to load from DB: {e}")
             
             return 0
             

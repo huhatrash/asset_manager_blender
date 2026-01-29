@@ -186,17 +186,18 @@ class ASSETMANAGER_OT_change_page_size(bpy.types.Operator):
     page_size: bpy.props.EnumProperty(
         name="Assets Per Page",
         items=[
+            ('10', '10', 'Show 10 assets per page (Default)'),
             ('25', '25', 'Show 25 assets per page'),
-            ('50', '50', 'Show 50 assets per page (Default)'),
+            ('50', '50', 'Show 50 assets per page'),
             ('100', '100', 'Show 100 assets per page'),
             ('200', '200', 'Show 200 assets per page'),
         ],
-        default='50'
+        default='10'
     )
     
     def invoke(self, context, event):
         scene = context.scene
-        current_size = getattr(scene, "asset_page_size", 50)
+        current_size = getattr(scene, "asset_page_size", 10)
         self.page_size = str(current_size)
         return context.window_manager.invoke_props_dialog(self)
     
@@ -271,7 +272,7 @@ class ASSETMANAGER_OT_change_sort(bpy.types.Operator):
         
         # Reload current page with new sorting
         current_page = getattr(scene, "asset_current_page", 0)
-        page_size = getattr(scene, "asset_page_size", 50)
+        page_size = getattr(scene, "asset_page_size", 10)
         
         load_assets_to_scene(context, page=current_page, page_size=page_size, force_reload=True)
         
