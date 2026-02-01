@@ -50,31 +50,40 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
         row = filter_box.row()
         row.prop(scene, "asset_category", text="Category")
         
+        # ================= ADVANCED FILTERS (COLLAPSIBLE) =================
+
+        # Toggle header untuk advanced filters
+        row = filter_box.row(align=True)
+        show_advanced = getattr(scene, "show_advanced_filters", False)
+
+        icon = 'TRIA_DOWN' if show_advanced else 'TRIA_RIGHT'
+        row.prop(scene, "show_advanced_filters", 
+                icon=icon, icon_only=True, emboss=False)
+        row.label(text="Advanced Filters", icon='PREFERENCES')
+
+        # Tampilkan filter advanced hanya jika expanded
+        if show_advanced:
+            
+            # File size filters
+            col = filter_box.column(align=True)
+            col.label(text="File Size (KB):", icon='FILE')
+            row = col.row(align=True)
+            row.prop(scene, "filter_min_size", text="Min")
+            row.prop(scene, "filter_max_size", text="Max")
+            
+            # Polygon filters
+            col = filter_box.column(align=True)
+            col.label(text="Polygon Count:", icon='MESH_CUBE')
+            row = col.row(align=True)
+            row.prop(scene, "filter_min_poly", text="Min")
+            row.prop(scene, "filter_max_poly", text="Max")
+
         # Filter controls
         row = filter_box.row(align=True)
         row.operator("assetmanager.apply_filters", text="Apply", icon='FILTER')
         row.operator("assetmanager.clear_filters", text="Clear", icon='X')
-        
-        # ================= ADVANCED FILTERS (COLLAPSIBLE) =================
-        filter_box.separator()
-        
-        # File size filters
-        col = filter_box.column(align=True)
-        col.label(text="File Size (KB):", icon='FILE')
-        row = col.row(align=True)
-        row.prop(scene, "filter_min_size", text="Min")
-        row.prop(scene, "filter_max_size", text="Max")
-        
-        # Polygon filters
-        col = filter_box.column(align=True)
-        col.label(text="Polygon Count:", icon='MESH_CUBE')
-        row = col.row(align=True)
-        row.prop(scene, "filter_min_poly", text="Min")
-        row.prop(scene, "filter_max_poly", text="Max")
-        
-        layout.separator()
-        
-         # ================= PAGINATION INFO (COLLAPSIBLE) =================
+
+        # ================= PAGINATION INFO (COLLAPSIBLE) =================
         total = getattr(scene, "asset_total_count", 0)
         current_page = getattr(scene, "asset_current_page", 0)
         total_pages = getattr(scene, "asset_total_pages", 0)
@@ -158,6 +167,41 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
             row.label(text="All assets on one page", icon='INFO')
         
         layout.separator()
+        
+         # ================= ASSET BROWSER =================
+        # Info header (compact)
+        total = getattr(scene, "asset_total_count", 0)
+        current_page = getattr(scene, "asset_current_page", 0)
+        total_pages = getattr(scene, "asset_total_pages", 0)
+        page_size = getattr(scene, "asset_page_size", 10)
+        loaded = len(scene.asset_items)
+
+        box = layout.box()
+        row = box.row(align=True)
+
+        # Show result count (LEFT)
+        if total > 0:
+            row.label(text=f"Showing {loaded} of {total:,} assets", icon='ASSET_MANAGER')
+        else:
+            row.label(text="No assets found", icon='INFO')
+
+        # Spacer untuk push ke kanan
+        row.label(text="")
+
+        # Sort button (RIGHT)
+        sort_by = getattr(scene, "asset_sort_by", 'created_at')
+        sort_order = getattr(scene, "asset_sort_order", 'DESC')
+        sort_icon = 'SORT_DESC' if sort_order == 'DESC' else 'SORT_ASC'
+        sort_labels = {
+            'created_at': 'Date',
+            'name': 'Name',
+            'category': 'Category',
+            'file_size': 'Size',
+            'poly_count': 'Polys',
+        }
+        row.operator("assetmanager.change_sort", 
+                    text=sort_labels.get(sort_by, sort_by), 
+                    icon=sort_icon, emboss=False)
         
         # ================= ASSET LIST & PREVIEW =================
         split = layout.split(factor=0.5)
@@ -314,6 +358,7 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
 class ASSETMANAGER_PT_quick_filters(bpy.types.Panel):
     """Quick filter presets sub-panel"""
     bl_label = "Quick Filters"
+            # File path (read-only, scrollable)
     bl_idname = "ASSETMANAGER_PT_quick_filters"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'

@@ -147,6 +147,12 @@ def init_scene_properties():
         update=lambda self, context: on_filter_update(context)
     )
     
+    bpy.types.Scene.show_advanced_filters = bpy.props.BoolProperty(
+    name="Show Advanced Filters",
+    description="Toggle advanced filter options",
+    default=False  
+    )
+    
     # Advanced filters
     bpy.types.Scene.filter_min_size = bpy.props.IntProperty(
         name="Min Size (KB)",
