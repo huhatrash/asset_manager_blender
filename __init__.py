@@ -52,7 +52,14 @@ from .operators import (
 )
 
 # UI
-from .ui.panel import ASSETMANAGER_PT_panel, ASSETMANAGER_PT_quick_filters
+from .ui.panel import (
+    ASSETMANAGER_PT_panel,
+    ASSETMANAGER_PT_browse,
+    ASSETMANAGER_PT_details,
+    ASSETMANAGER_PT_filters,
+    ASSETMANAGER_PT_quick_filters,
+    ASSETMANAGER_PT_management,
+)
 from .ui.ui_list import ASSETMANAGER_UL_list
 
 
@@ -75,6 +82,11 @@ classes = (
     import_local.ASSETMANAGER_OT_import_local,
     export_local.ASSETMANAGER_OT_export_local,
     show_catalog.ASSETMANAGER_OT_show_catalog,
+    show_catalog.ASSETMANAGER_OT_catalog_refresh,
+    show_catalog.ASSETMANAGER_OT_catalog_first_page,
+    show_catalog.ASSETMANAGER_OT_catalog_prev_page,
+    show_catalog.ASSETMANAGER_OT_catalog_next_page,
+    show_catalog.ASSETMANAGER_OT_catalog_last_page,
     
     # Pagination Operators
     pagination_operators.ASSETMANAGER_OT_next_page,
@@ -91,7 +103,11 @@ classes = (
     
     # Panels
     ASSETMANAGER_PT_panel,
+    ASSETMANAGER_PT_browse,
+    ASSETMANAGER_PT_details,
+    ASSETMANAGER_PT_filters,
     ASSETMANAGER_PT_quick_filters,
+    ASSETMANAGER_PT_management,
 )
 
 

@@ -64,22 +64,22 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
         item.id = a["id"]
         item.uuid = a["uuid"]
         
-        item.name = a.get("name", "")
-        item.category = a.get("category", "")
-        item.description = a.get("description", "")
+        item.name = a.get("name") or ""
+        item.category = a.get("category") or ""
+        item.description = a.get("description") or ""
         
-        item.file_path = a.get("file_path", "")
-        item.file_size = a.get("file_size", 0)
+        item.file_path = a.get("file_path") or ""
+        item.file_size = a.get("file_size") or 0
         
-        item.poly_count = a.get("poly_count", 0)
-        item.vertices = a.get("vertices", 0)
-        item.faces = a.get("faces", 0)
+        item.poly_count = a.get("poly_count") or 0
+        item.vertices = a.get("vertices") or 0
+        item.faces = a.get("faces") or 0
         
-        item.created_at = a.get("created_at", "")
-        item.updated_at = a.get("updated_at", "")
+        item.created_at = a.get("created_at") or ""
+        item.updated_at = a.get("updated_at") or ""
         
         # PERBAIKI INI: Simpan thumbnail_path dari database, bukan key
-        item.preview_icon = a.get("thumbnail_path", "")  # Path thumbnail dari DB
+        item.preview_icon = a.get("thumbnail_path") or ""  # Path thumbnail dari DB
     
     # Reset selection to first item
     if len(scene.asset_items) > 0:
@@ -139,17 +139,17 @@ def load_assets_with_filters(context):
         
         item.id = a["id"]
         item.uuid = a["uuid"]
-        item.name = a.get("name", "")
-        item.category = a.get("category", "")
-        item.description = a.get("description", "")
-        item.file_path = a.get("file_path", "")
-        item.file_size = a.get("file_size", 0)
-        item.poly_count = a.get("poly_count", 0)
-        item.vertices = a.get("vertices", 0)
-        item.faces = a.get("faces", 0)
-        item.created_at = a.get("created_at", "")
-        item.updated_at = a.get("updated_at", "")
-        item.preview_icon = a.get("thumbnail_path", "") 
+        item.name = a.get("name") or ""
+        item.category = a.get("category") or ""
+        item.description = a.get("description") or ""
+        item.file_path = a.get("file_path") or ""
+        item.file_size = a.get("file_size") or 0
+        item.poly_count = a.get("poly_count") or 0
+        item.vertices = a.get("vertices") or 0
+        item.faces = a.get("faces") or 0
+        item.created_at = a.get("created_at") or ""
+        item.updated_at = a.get("updated_at") or ""
+        item.preview_icon = a.get("thumbnail_path") or "" 
     
     if len(scene.asset_items) > 0:
         scene.asset_index = 0
@@ -185,17 +185,17 @@ def update_single_asset_in_scene(context, asset_id):
     for item in scene.asset_items:
         if item.id == asset_id:
             # Update all fields
-            item.uuid = updated.get("uuid", "")
-            item.name = updated.get("name", "")
-            item.category = updated.get("category", "")
-            item.description = updated.get("description", "")
-            item.file_path = updated.get("file_path", "")
-            item.file_size = updated.get("file_size", 0)
-            item.poly_count = updated.get("poly_count", 0)
-            item.vertices = updated.get("vertices", 0)
-            item.faces = updated.get("faces", 0)
-            item.updated_at = updated.get("updated_at", "")
-            item.preview_icon = updated.get("thumbnail_path", "") 
+            item.uuid = updated.get("uuid") or ""
+            item.name = updated.get("name") or ""
+            item.category = updated.get("category") or ""
+            item.description = updated.get("description") or ""
+            item.file_path = updated.get("file_path") or ""
+            item.file_size = updated.get("file_size") or 0
+            item.poly_count = updated.get("poly_count") or 0
+            item.vertices = updated.get("vertices") or 0
+            item.faces = updated.get("faces") or 0
+            item.updated_at = updated.get("updated_at") or ""
+            item.preview_icon = updated.get("thumbnail_path") or "" 
             
             found = True
             break
@@ -228,17 +228,17 @@ def add_single_asset_to_scene(context, asset_id):
     
     item.id = asset["id"]
     item.uuid = asset["uuid"]
-    item.name = asset.get("name", "")
-    item.category = asset.get("category", "")
-    item.description = asset.get("description", "")
-    item.file_path = asset.get("file_path", "")
-    item.file_size = asset.get("file_size", 0)
-    item.poly_count = asset.get("poly_count", 0)
-    item.vertices = asset.get("vertices", 0)
-    item.faces = asset.get("faces", 0)
-    item.created_at = asset.get("created_at", "")
-    item.updated_at = asset.get("updated_at", "")
-    item.preview_icon = asset.get("thumbnail_path", "")
+    item.name = asset.get("name") or ""
+    item.category = asset.get("category") or ""
+    item.description = asset.get("description") or ""
+    item.file_path = asset.get("file_path") or ""
+    item.file_size = asset.get("file_size") or 0
+    item.poly_count = asset.get("poly_count") or 0
+    item.vertices = asset.get("vertices") or 0
+    item.faces = asset.get("faces") or 0
+    item.created_at = asset.get("created_at") or ""
+    item.updated_at = asset.get("updated_at") or ""
+    item.preview_icon = asset.get("thumbnail_path") or ""
     
     # Move to top (most recent)
     # Since we can't reorder, just reload the page

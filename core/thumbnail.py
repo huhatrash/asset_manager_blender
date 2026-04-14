@@ -37,49 +37,53 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
     temp_lights = []  # Multiple lights untuk pencahayaan merata
     
     try:
-        # ✅ SETUP RENDER - CYCLES
-        scene.render.engine = 'CYCLES'
-        scene.cycles.samples = samples
-        scene.cycles.preview_samples = samples
-        scene.cycles.use_denoising = True
-        
-        # GPU jika ada
-        if _has_gpu():
-            scene.cycles.device = 'GPU'
-        
         # ✅ TRANSPARENT BACKGROUND
         scene.render.film_transparent = True
         
-        # ✅ WORLD SETTING - HITAM TOTAL
+        # ✅ ISOLASI CAHAYA TOTAL (Konsistensi Penuh)
+        # 1. Matikan World Scene, ganti hitam buta agar HDRI/ambient scene tidak bocor!
         if not scene.world:
             scene.world = bpy.data.worlds.new("World")
-        
         scene.world.use_nodes = True
         world_nodes = scene.world.node_tree.nodes
         world_nodes.clear()
-        
         bg_node = world_nodes.new('ShaderNodeBackground')
-        bg_node.inputs['Color'].default_value = (0, 0, 0, 1)
+        bg_node.inputs['Color'].default_value = (0, 0, 0, 1) # Hitam Total
         bg_node.inputs['Strength'].default_value = 0.0
-        
         output_node = world_nodes.new('ShaderNodeOutputWorld')
         scene.world.node_tree.links.new(bg_node.outputs[0], output_node.inputs[0])
         
-        # ✅ VIEW SETTINGS
+        # 2. Kembalikan Exposure ke 0.0 agar tidak "terbakar"
         scene.view_settings.view_transform = 'Standard'
-        scene.view_settings.exposure = 2.0  # Lebih terang
+        scene.view_settings.exposure = 0.0
         scene.view_settings.gamma = 1.0
-        
-        # ✅ HIDE SEMUA OBJECT KECUALI TARGET
-        for o in scene.objects:
-            if o != obj:
-                o.hide_render = True
+
+        # ✅ BAKE OBJECT GRAPH UNTUK MELINDUNGI GEOMETRY NODES/MODIFIERS ASLI
+        bpy.ops.object.select_all(action='DESELECT')
         
         obj.hide_viewport = False
         obj.hide_render = False
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
         
-        # ✅ ENSURE MATERIALS
-        _ensure_materials_visible(obj)
+        # Duplikat & Realisasi (Bake)
+        bpy.ops.object.duplicate(linked=False)
+        temp_obj = bpy.context.active_object
+        try:
+            bpy.ops.object.convert(target='MESH')
+        except:
+            pass # Aman jika gagal convert
+            
+        # ✅ HIDE SEMUA OBJECT AND LAMPU SCENE (TERMASUK ORIGINAL) KECUALI TEMP_OBJ
+        for o in scene.objects:
+            if o != temp_obj and getattr(o, 'type', '') not in {'CAMERA'}:
+                o.hide_render = True
+        
+        temp_obj.hide_viewport = False
+        temp_obj.hide_render = False
+        
+        # ✅ MATIKAN CODE PERUSAK MATERIAL
+        # JANGAN gunakan _ensure_materials_visible karena akan menimpa warna asli objek Anda!
         
         # ✅ CREATE TEMPORARY CAMERA
         cam_data = bpy.data.cameras.new("_TempThumbCam")
@@ -90,11 +94,13 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
         scene.collection.objects.link(temp_camera)
         scene.camera = temp_camera
         
-        # ✅ POSISI KAMERA
-        bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+        # ✅ POSISI KAMERA (Fokus ke geometri yang sudah di-bake)
+        bbox_corners = [temp_obj.matrix_world @ Vector(corner) for corner in temp_obj.bound_box]
         bbox_center = sum(bbox_corners, Vector()) / 8
         max_distance = max((corner - bbox_center).length for corner in bbox_corners)
-        cam_distance = max(max_distance * 2.5, 3.0)
+        
+        # Kalkulasi zoom yang wajar menutupi frame
+        cam_distance = max(max_distance * 2.5, 0.1)
         
         temp_camera.location = bbox_center + Vector((
             cam_distance * 0.7,
@@ -106,7 +112,7 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
         rot_quat = direction.to_track_quat('-Z', 'Y')
         temp_camera.rotation_euler = rot_quat.to_euler()
         
-        # ✅ CREATE MULTI-LIGHT SETUP untuk pencahayaan merata
+        # ✅ CREATE MULTI-LIGHT SETUP
         temp_lights = _create_studio_lighting(scene, bbox_center, cam_distance)
         
         # ✅ RENDER SETTINGS
@@ -122,6 +128,7 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
         scene.render.resolution_percentage = 100
         
         # ✅ RENDER
+        bpy.context.view_layer.update()
         bpy.ops.render.render(write_still=True)
         
         success = os.path.exists(output_path)
@@ -141,16 +148,25 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
         # ✅ CLEANUP - DELETE TEMPORARY OBJECTS
         try:
             # Delete temp lights
-            for light_obj in temp_lights:
-                if light_obj:
-                    light_data = light_obj.data
-                    if light_obj.name in bpy.data.objects:
-                        bpy.data.objects.remove(light_obj, do_unlink=True)
-                    if light_data and light_data.name in bpy.data.lights:
-                        bpy.data.lights.remove(light_data)
+            if 'temp_lights' in locals():
+                for light_obj in temp_lights:
+                    if light_obj:
+                        light_data = light_obj.data
+                        if light_obj.name in bpy.data.objects:
+                            bpy.data.objects.remove(light_obj, do_unlink=True)
+                        if light_data and light_data.name in bpy.data.lights:
+                            bpy.data.lights.remove(light_data)
+        
+            # Delete temp baked object
+            if 'temp_obj' in locals() and temp_obj:
+                if temp_obj.name in bpy.data.objects:
+                    temp_mesh = temp_obj.data
+                    bpy.data.objects.remove(temp_obj, do_unlink=True)
+                    if temp_mesh and temp_mesh.name in bpy.data.meshes:
+                        bpy.data.meshes.remove(temp_mesh)
             
             # Delete temp camera
-            if temp_camera:
+            if 'temp_camera' in locals() and temp_camera:
                 cam_data = temp_camera.data
                 if temp_camera.name in bpy.data.objects:
                     bpy.data.objects.remove(temp_camera, do_unlink=True)
@@ -186,86 +202,73 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
 def _create_studio_lighting(scene, center, distance):
     """
     Create professional 3-point studio lighting setup untuk thumbnail.
-    
-    Returns:
-        list: List of temporary light objects
     """
+    # ==============================================================
+    # 🌟 PENGATURAN TINGKAT KETERANGAN CAHAYA 🌟
+    # DI SINI CARA MENGATURNYA! Ubah angka "Watt" ini jika masih keputihan/gelap.
+    # Nilainya saya buat standar (SOFT) agar "tidak terlalu terang"
+    # ==============================================================
+    BASE_KEY_LIGHT   = 1500    # Lampu Utama (Kanan Atas)
+    BASE_FILL_LIGHT  = 800     # Lampu Tambahan (Kiri) agar bayangan tidak gelap buta
+    BASE_RIM_LIGHT   = 1200    # Lampu Belakang (Siluet)
+    BASE_AMBIENT     = 500     # Cahaya Merata dari depan atas
+    # ==============================================================
+    
     lights = []
     
-    # 1. KEY LIGHT (Main light) - Front kanan atas
+    # Skala pembesaran cahaya linear agar tidak meledak (not "terang sekali")
+    # Jika objeknya besar, cahaya perlahan membesar.
+    scale_factor = max(distance / 2.5, 0.5)
+    
+    # 1. KEY LIGHT
     key_data = bpy.data.lights.new(name="_TempKeyLight", type='AREA')
-    key_data.energy = 3000  # Lebih terang
-    key_data.size = 4
-    key_data.color = (1.0, 0.98, 0.95)  # Warm white
+    key_data.energy = BASE_KEY_LIGHT * scale_factor
+    key_data.size = max(4 * scale_factor, 1.0)
+    key_data.color = (1.0, 0.98, 0.95)
     
     key_light = bpy.data.objects.new("_TempKeyLight", key_data)
-    key_light.location = center + Vector((
-        distance * 0.9,
-        -distance * 0.6,
-        distance * 0.8
-    ))
-    
-    # Point ke center
-    direction = center - key_light.location
-    rot_quat = direction.to_track_quat('-Z', 'Y')
+    key_light.location = center + Vector((distance * 0.9, -distance * 0.6, distance * 0.8))
+    rot_quat = (center - key_light.location).to_track_quat('-Z', 'Y')
     key_light.rotation_euler = rot_quat.to_euler()
-    
     scene.collection.objects.link(key_light)
     lights.append(key_light)
     
-    # 2. FILL LIGHT - Front kiri, lebih soft
+    # 2. FILL LIGHT
     fill_data = bpy.data.lights.new(name="_TempFillLight", type='AREA')
-    fill_data.energy = 1500  # Lebih soft dari key
-    fill_data.size = 5
-    fill_data.color = (0.95, 0.95, 1.0)  # Slightly cool
+    fill_data.energy = BASE_FILL_LIGHT * scale_factor
+    fill_data.size = max(5 * scale_factor, 1.0)
+    fill_data.color = (0.95, 0.95, 1.0)
     
     fill_light = bpy.data.objects.new("_TempFillLight", fill_data)
-    fill_light.location = center + Vector((
-        -distance * 0.7,
-        -distance * 0.5,
-        distance * 0.6
-    ))
-    
-    direction = center - fill_light.location
-    rot_quat = direction.to_track_quat('-Z', 'Y')
+    fill_light.location = center + Vector((-distance * 0.7, -distance * 0.5, distance * 0.6))
+    rot_quat = (center - fill_light.location).to_track_quat('-Z', 'Y')
     fill_light.rotation_euler = rot_quat.to_euler()
-    
     scene.collection.objects.link(fill_light)
     lights.append(fill_light)
     
-    # 3. RIM LIGHT - Belakang atas untuk edge definition
+    # 3. RIM LIGHT
     rim_data = bpy.data.lights.new(name="_TempRimLight", type='AREA')
-    rim_data.energy = 2000
-    rim_data.size = 3
-    rim_data.color = (1.0, 1.0, 1.0)  # Pure white
+    rim_data.energy = BASE_RIM_LIGHT * scale_factor
+    rim_data.size = max(3 * scale_factor, 1.0)
+    rim_data.color = (1.0, 1.0, 1.0)
     
     rim_light = bpy.data.objects.new("_TempRimLight", rim_data)
-    rim_light.location = center + Vector((
-        -distance * 0.4,
-        distance * 0.8,
-        distance * 0.9
-    ))
-    
-    direction = center - rim_light.location
-    rot_quat = direction.to_track_quat('-Z', 'Y')
+    rim_light.location = center + Vector((-distance * 0.4, distance * 0.8, distance * 0.9))
+    rot_quat = (center - rim_light.location).to_track_quat('-Z', 'Y')
     rim_light.rotation_euler = rot_quat.to_euler()
-    
     scene.collection.objects.link(rim_light)
     lights.append(rim_light)
     
-    # 4. AMBIENT LIGHT - Soft overall illumination
+    # 4. AMBIENT LIGHT
     ambient_data = bpy.data.lights.new(name="_TempAmbientLight", type='AREA')
-    ambient_data.energy = 800
-    ambient_data.size = 6
+    ambient_data.energy = BASE_AMBIENT * scale_factor
+    ambient_data.size = max(6 * scale_factor, 1.0)
     ambient_data.color = (1.0, 1.0, 1.0)
     
     ambient_light = bpy.data.objects.new("_TempAmbientLight", ambient_data)
     ambient_light.location = center + Vector((0, 0, distance * 1.2))
-    
-    direction = center - ambient_light.location
-    rot_quat = direction.to_track_quat('-Z', 'Y')
+    rot_quat = (center - ambient_light.location).to_track_quat('-Z', 'Y')
     ambient_light.rotation_euler = rot_quat.to_euler()
-    
     scene.collection.objects.link(ambient_light)
     lights.append(ambient_light)
     

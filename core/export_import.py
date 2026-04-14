@@ -1,11 +1,3 @@
-"""
-Export/Import Module - Asset Manager
-Handles asset file export and import operations.
-
-Author: alfa haliza
-Version: 2.0
-"""
-
 import bpy
 import os
 from .paths import get_exports_dir, get_safe_filename, get_unique_filepath
@@ -102,9 +94,77 @@ def export_selected_to_fbx(obj, output_dir, filename=None):
         return None
 
 
+def _collect_dependencies(obj):
+    """
+    Collect ALL data-blocks that an object depends on:
+    mesh, materials, textures, images, node groups, etc.
+    This ensures textures, UV maps, and shading are saved.
+    
+    Args:
+        obj (bpy.types.Object): Source object
+    
+    Returns:
+        set: Set of data-blocks to write
+    """
+    datablocks = set()
+    datablocks.add(obj)
+    
+    # Mesh data (contains UV maps, vertex colors, shape keys)
+    if obj.data:
+        datablocks.add(obj.data)
+    
+    # Shape keys
+    if obj.data and hasattr(obj.data, 'shape_keys') and obj.data.shape_keys:
+        datablocks.add(obj.data.shape_keys)
+    
+    # Materials and their full node trees
+    if obj.data and hasattr(obj.data, 'materials'):
+        for mat in obj.data.materials:
+            if mat is None:
+                continue
+            datablocks.add(mat)
+            
+            # Node tree (shader nodes)
+            if mat.node_tree:
+                datablocks.add(mat.node_tree)
+                
+                # Walk all nodes to find images and node groups
+                for node in mat.node_tree.nodes:
+                    # Image textures
+                    if hasattr(node, 'image') and node.image:
+                        datablocks.add(node.image)
+                        # Pack image data so it's embedded in the .blend
+                        if not node.image.packed_file:
+                            try:
+                                node.image.pack()
+                            except Exception as e:
+                                print(f"[AssetManager] Could not pack image "
+                                      f"'{node.image.name}': {e}")
+                    
+                    # Node groups (e.g. custom shader setups)
+                    if hasattr(node, 'node_tree') and node.node_tree:
+                        datablocks.add(node.node_tree)
+    
+    # Particle systems (may reference textures/materials)
+    if hasattr(obj, 'particle_systems'):
+        for psys in obj.particle_systems:
+            if psys.settings:
+                datablocks.add(psys.settings)
+    
+    # Modifiers that reference other objects/data
+    for mod in obj.modifiers:
+        if hasattr(mod, 'object') and mod.object:
+            datablocks.add(mod.object)
+            if mod.object.data:
+                datablocks.add(mod.object.data)
+    
+    return datablocks
+
+
 def export_selected_to_blend(obj, output_dir, filename=None):
     """
-    Export selected object to .blend format.
+    Export selected object to .blend format,
+    including all materials, textures, UV maps, and shading data.
     
     Args:
         obj (bpy.types.Object): Object to export
@@ -135,10 +195,14 @@ def export_selected_to_blend(obj, output_dir, filename=None):
         bpy.ops.object.select_all(action='DESELECT')
         obj.select_set(True)
         
-        # Save as blend file
+        # Collect all dependent data-blocks
+        datablocks = _collect_dependencies(obj)
+        print(f"[AssetManager] Collected {len(datablocks)} data-blocks for export")
+        
+        # Save as blend file with ALL dependencies
         bpy.data.libraries.write(
             output_path,
-            {obj},
+            datablocks,
             compress=True
         )
         
@@ -250,7 +314,8 @@ def import_fbx_file(filepath, use_custom_props=True):
 
 def import_blend_file(filepath, link=False):
     """
-    Import objects from .blend file.
+    Import objects from .blend file, including all materials,
+    textures, UV maps, and shading data.
     
     Args:
         filepath (str): Path to .blend file
@@ -267,36 +332,59 @@ def import_blend_file(filepath, link=False):
     objects_before = set(bpy.data.objects)
     
     try:
-        # Construct directory path for append/link
-        directory = os.path.join(filepath, "Object")
+        # Load objects AND materials from the .blend file
+        with bpy.data.libraries.load(filepath, link=link) as (data_from, data_to):
+            # Import all objects
+            data_to.objects = data_from.objects
+            # Import all materials (ensures textures & shading come along)
+            data_to.materials = data_from.materials
+            # Import all images (texture files)
+            data_to.images = data_from.images
+            # Import all node groups (custom shader setups)
+            data_to.node_groups = data_from.node_groups
         
-        # Get list of objects in the blend file
-        with bpy.data.libraries.load(filepath) as (data_from, data_to):
-            object_names = data_from.objects
+        # Link imported objects into the current scene/collection
+        imported_objects = []
+        scene_collection = bpy.context.scene.collection
         
-        # Import each object
-        for obj_name in object_names:
-            if link:
-                bpy.ops.wm.link(
-                    directory=directory,
-                    filename=obj_name
-                )
-            else:
-                bpy.ops.wm.append(
-                    directory=directory,
-                    filename=obj_name
-                )
+        for obj in data_to.objects:
+            if obj is not None:
+                # Add to scene collection so it's visible
+                scene_collection.objects.link(obj)
+                imported_objects.append(obj)
         
-        # Get newly imported objects
-        objects_after = set(bpy.data.objects)
-        imported_objects = list(objects_after - objects_before)
-        
-        print(f"[AssetManager] Imported {len(imported_objects)} objects from .blend")
+        print(f"[AssetManager] Imported {len(imported_objects)} objects from .blend "
+              f"(with {len(data_to.materials)} materials, "
+              f"{len(data_to.images)} images)")
         return imported_objects
         
     except Exception as e:
         print(f"[AssetManager] .blend import error: {e}")
-        return []
+        
+        # Fallback: try the old wm.append method which handles
+        # some edge cases that libraries.load does not
+        try:
+            print("[AssetManager] Trying fallback append method...")
+            directory = os.path.join(filepath, "Object")
+            
+            with bpy.data.libraries.load(filepath) as (data_from, data_to):
+                object_names = data_from.objects
+            
+            for obj_name in object_names:
+                bpy.ops.wm.append(
+                    directory=directory,
+                    filename=obj_name,
+                    link=link,
+                )
+            
+            objects_after = set(bpy.data.objects)
+            imported_objects = list(objects_after - objects_before)
+            print(f"[AssetManager] Fallback imported {len(imported_objects)} objects")
+            return imported_objects
+            
+        except Exception as e2:
+            print(f"[AssetManager] Fallback also failed: {e2}")
+            return []
 
 
 def import_obj_file(filepath):
