@@ -67,7 +67,6 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
             row.label(text="No assets yet — register your first one below!")
         row.operator("assetmanager.refresh_assets", text="", icon='FILE_REFRESH')
 
-
 # =====================================================
 # 1) SEARCH & BROWSE  — the most-used section
 # =====================================================
@@ -85,28 +84,23 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
 
-        # ---- Search + Category (inline) ----
+        # ---- Search + Category + Favorites + Sort (compact single row) ----
         row = layout.row(align=True)
         row.prop(scene, "asset_search", text="", icon='VIEWZOOM',
-                 placeholder="Search assets...")
+                 placeholder="Search...")
         row.prop(scene, "asset_category", text="")
+        
+        # Favorites toggle
+        filter_icon = 'SOLO_ON' if scene.filter_favorites else 'SOLO_OFF'
+        row.prop(scene, "filter_favorites", text="", icon=filter_icon)
 
-        layout.separator(factor=0.4)
-
-        # ---- Sort quick-toggle ----
-        sort_by = getattr(scene, "asset_sort_by", 'created_at')
+        # Sort toggle (icon only)
         sort_order = getattr(scene, "asset_sort_order", 'DESC')
         sort_icon = 'SORT_DESC' if sort_order == 'DESC' else 'SORT_ASC'
-
-        row = layout.row(align=True)
-        row.alignment = 'RIGHT'
-        row.label(text="Sort:")
-        row.operator("assetmanager.change_sort",
-                     text=SORT_LABELS.get(sort_by, sort_by),
-                     icon=sort_icon, emboss=False)
+        row.operator("assetmanager.change_sort", text="", icon='PROPERTIES')
 
         # ---- Asset list + preview ----
-        split = layout.split(factor=0.55)
+        split = layout.split(factor=0.50)
 
         # LEFT — list
         col_list = split.column()
@@ -129,7 +123,7 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
                 if preview_key in pcoll:
                     col_prev.template_icon(
                         icon_value=pcoll[preview_key].icon_id,
-                        scale=7,
+                        scale=8,
                     )
                 else:
                     box = col_prev.box()
@@ -144,33 +138,34 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
             box.scale_y = 4.0
             box.label(text="Preview off", icon='HIDE_ON')
 
-        col_prev.prop(scene, "show_thumbnail", text="Preview", toggle=True)
+        col_prev.prop(scene, "show_thumbnail", text="Preview")
 
-        # ---- Pagination (compact row) ----
+        # ---- Pagination (optimized width) ----
         total_pages = getattr(scene, "asset_total_pages", 0)
         current_page = getattr(scene, "asset_current_page", 0)
 
-        row = layout.row(align=True)
-        row.scale_y = 0.9
-        row.enabled = (total_pages > 1)
-        row.operator("assetmanager.first_page", text="", icon='REW')
-        row.operator("assetmanager.previous_page", text="", icon='TRIA_LEFT')
+        # Split: pagination vs page size (align=False to keep them separate)
+        split = layout.split(factor=0.80, align=False)
+        
+        row_pag = split.row(align=True)
+        row_pag.enabled = (total_pages > 1)
+        row_pag.operator("assetmanager.first_page", text="", icon='REW')
+        row_pag.operator("assetmanager.previous_page", text="", icon='TRIA_LEFT')
 
         if total_pages > 0:
-            row.operator("assetmanager.go_to_page",
-                         text=f"{current_page + 1} / {total_pages}")
+            row_pag.operator("assetmanager.go_to_page",
+                             text=f"{current_page + 1} / {total_pages}")
         else:
-            row.operator("assetmanager.go_to_page", text="1 / 1")
+            row_pag.operator("assetmanager.go_to_page", text="1 / 1")
 
-        row.operator("assetmanager.next_page", text="", icon='TRIA_RIGHT')
-        row.operator("assetmanager.last_page", text="", icon='FF')
+        row_pag.operator("assetmanager.next_page", text="", icon='TRIA_RIGHT')
+        row_pag.operator("assetmanager.last_page", text="", icon='FF')
 
+        # Page Size (separated by the split's natural gap)
+        row_size = split.row(align=True)
         page_size = getattr(scene, "asset_page_size", 10)
-        row.separator()
-        row.operator("assetmanager.change_page_size",
-                     text=str(page_size), icon='COLLAPSEMENU')
-
-        layout.separator(factor=0.5)
+        row_size.operator("assetmanager.change_page_size",
+                          text=str(page_size), icon='PREFERENCES')
 
         # ---- Primary actions for selected asset ----
         idx = scene.asset_index
@@ -222,36 +217,57 @@ class ASSETMANAGER_PT_details(bpy.types.Panel):
         layout.use_property_split = True
         layout.use_property_decorate = False
 
-        # Metadata
-        col = layout.column(align=True)
-        col.prop(item, "name", text="Name")
-        col.prop(item, "category", text="Category")
-        col.prop(item, "description", text="Desc")
+       # ================= METADATA =================
+        col = layout.column()
+        col.enabled = False
+
+        def draw_field(col, label, prop):
+            row = col.row()
+            split = row.split(factor=0.25)
+            split.label(text=label)
+            split.prop(item, prop, text="")
+
+        draw_field(col, "Name", "name")
+        draw_field(col, "Category", "category")
+        draw_field(col, "Desc", "description")
 
         layout.separator(factor=0.5)
 
-        # Mesh stats — compact two-column grid
-        grid = layout.grid_flow(columns=2, even_columns=True,
-                                even_rows=True, align=True)
+        # ================= MESH STATS =================
+        box = layout.box()
+        grid = box.grid_flow(columns=2, even_columns=True, even_rows=True, align=True)
+
         grid.label(text=f"Polys: {_format_count(item.poly_count)}", icon='MESH_DATA')
         grid.label(text=f"Verts: {_format_count(item.vertices)}", icon='VERTEXSEL')
 
-        layout.separator(factor=0.5)
+        layout.separator(factor=0.6)
+        
+        # ================= FILE INFO =================
+        col_file = layout.column()
 
-        # File info
-        col = layout.column(align=True)
-        col.label(text=f"Size: {_format_size(item.file_size)}", icon='FILE')
+        def draw_value(col, label, value):
+            row = col.row()
+            split = row.split(factor=0.25)
+            split.label(text=label)
+            split.label(text=value)
 
-        row = col.row()
+        # SIZE (normal)
+        draw_value(col_file, "Size", _format_size(item.file_size))
+
+        # PATH (ONLY THIS DISABLED)
+        row = col_file.row()
         row.enabled = False
-        row.prop(item, "file_path", text="Path")
+        split = row.split(factor=0.25)
+        split.label(text="Path")
+        split.prop(item, "file_path", text="")
 
-        # Timestamps (dimmed)
-        col.separator(factor=0.3)
-        sub = col.column(align=True)
-        sub.scale_y = 0.85
-        sub.label(text=f"Created: {item.created_at}")
-        sub.label(text=f"Updated: {item.updated_at}")
+        # ================= TIMESTAMPS =================
+        col_file.separator(factor=0.4)
+
+        sub = col_file.column()
+
+        draw_value(sub, "Created", item.created_at)
+        draw_value(sub, "Updated", item.updated_at)
 
         # Delete — deliberately at the bottom, de-emphasized
         layout.separator()
@@ -390,11 +406,11 @@ class ASSETMANAGER_PT_management(bpy.types.Panel):
 
 classes = (
     ASSETMANAGER_PT_panel,
+    ASSETMANAGER_PT_management,
     ASSETMANAGER_PT_browse,
     ASSETMANAGER_PT_details,
     ASSETMANAGER_PT_filters,
     ASSETMANAGER_PT_quick_filters,
-    ASSETMANAGER_PT_management,
 )
 
 

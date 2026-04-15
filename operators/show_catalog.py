@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import IntProperty, EnumProperty, StringProperty
+from bpy.props import IntProperty, EnumProperty, StringProperty, BoolProperty
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -39,6 +39,12 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         ],
         default='ALL',
     )
+    
+    filter_favorites: BoolProperty(
+        name="Show Favorites",
+        description="Show only favorite assets",
+        default=False
+    )
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -54,6 +60,7 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
             page_size = self.page_size,
             category  = cat,
             search    = self.search_text.strip(),
+            filter_favorites = self.filter_favorites
         )
 
         # Reload previews for this page only
@@ -75,13 +82,14 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         self._load_page()
         # invoke_props_dialog gives a proper modal dialog with OK/Cancel
         # width=960 gives a comfortable 4-column grid
-        return context.window_manager.invoke_props_dialog(self, width=960)
+        return context.window_manager.invoke_props_dialog(self, width=900)
 
     def draw(self, context):
         layout = self.layout
         total_pages = self._total_pages()
 
         # ── Header ───────────────────────────────────────────────────────────
+        
         header = layout.box()
         header.scale_y = 1.0
 
@@ -104,6 +112,9 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         ctrl_row.separator()
         ctrl_row.prop(self, "category_filter", text="")
         ctrl_row.separator()
+        filter_icon = 'SOLO_ON' if self.filter_favorites else 'SOLO_OFF'
+        ctrl_row.prop(self, "filter_favorites", text="", icon=filter_icon)
+        ctrl_row.separator()
         # Refresh
         ctrl_row.operator("assetmanager.catalog_refresh",
                           text="", icon='FILE_REFRESH')
@@ -124,57 +135,81 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         )
 
         for asset in self._assets:
-            card = grid.box()
-            card.scale_y = 1.0
+            # OUTER CARD (shadow illusion)
+            cell = grid.column()
 
-            # Thumbnail
-            key = f"asset_{asset['uuid']}"
-            if key in self._previews:
-                card.template_icon(
-                    icon_value=self._previews[key].icon_id,
-                    scale=5.5,
-                )
-            else:
-                # Placeholder icon row — centred
-                ph = card.row()
-                ph.alignment = 'CENTER'
-                ph.label(text="", icon='IMAGE_DATA')
-                # Spacer so card stays same height
-                for _ in range(3):
-                    card.label(text="")
+            # spacing atas
+            cell.separator(factor=0.6)
 
-            # Asset name — truncated if very long
-            name = asset.get('name', '—')
-            if len(name) > 22:
-                name = name[:20] + "…"
-            card.label(text=name, icon='OBJECT_DATA')
+            outer = cell.column()
+            outer.scale_y = 1.15
 
-            # # Category + size on one row
-            # cat       = asset.get('category', '')
-            # size_mb   = asset.get('file_size', 0) / (1024 * 1024)
-            # poly      = asset.get('poly_count', 0)
-            # info_row  = card.row(align=True)
-            # info_row.scale_y = 0.75
-            # info_row.label(text=f"{cat}")
-            # info_row.label(text=f"{size_mb:.1f} MB")
+            # INNER CARD (actual content)
+            card = outer.box()
 
-            # # Poly count if available
-            # if poly > 0:
-            #     pc_row = card.row()
-            #     pc_row.scale_y = 0.75
-            #     pc_row.label(text=f"{poly:,} polys", icon='MESH_CUBE')
-
-            # card.separator(factor=0.3)
-
-            # Action: Load
-            op_row = card.row(align=True)
-            op = op_row.operator(
-                "assetmanager.load_from_db",
-                text="Load", icon='IMPORT',
-            )
+            col = card.column(align=True)
+            
+            # --- TOP BAR (Name Left, Favorite Right) ---
+            top_bar = col.split(factor=0.8, align=True)
+            
+            # Left: Asset Name
+            name_col = top_bar.column()
+            name_col.alignment = 'LEFT'
+            name = asset.get('name', 'Unknown')
+            if len(name) > 16:
+                name = name[:14] + "..."
+            name_col.label(text=name)
+            
+            # Right: Star Toggle
+            star_col = top_bar.column()
+            star_col.alignment = 'RIGHT'
+            is_fav = bool(asset.get('is_favorite', 0))
+            fav_icon = 'SOLO_ON' if is_fav else 'SOLO_OFF'
+            op = star_col.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
             op.asset_id = asset['id']
 
-        layout.separator(factor=0.6)
+            # ================= THUMBNAIL AREA =================
+            thumb_wrap = col.box()  # bikin section khusus
+            thumb_wrap.scale_y = 1.0
+
+            thumb = thumb_wrap.row()
+            thumb.alignment = 'CENTER'
+
+            key = f"asset_{asset['uuid']}"
+
+            if key in self._previews:
+                thumb.template_icon(
+                    icon_value=self._previews[key].icon_id,
+                    scale=9  # lebih besar = lebih modern
+                )
+            else:
+                thumb.label(text="", icon='IMAGE_DATA')
+
+            col.separator()
+
+            # ================= TEXT AREA (Category) =================
+            text_col = col.column(align=True)
+            text_col.scale_y = 0.9
+
+            cat_row = text_col.row()
+            cat_row.alignment = 'CENTER'
+            cat_row.scale_y = 0.75
+            cat_row.label(text=asset.get('category', '').upper())
+
+            col.separator()
+
+            # ================= BUTTON =================
+            btn = col.row()
+            btn.scale_y = 1.0
+
+            op = btn.operator(
+                "assetmanager.load_from_db_deferred",
+                text="Load",
+                icon='IMPORT'
+            )
+            op.asset_id = asset['id']
+            
+        layout.separator(factor=1.0)
 
         # ── Pagination bar ────────────────────────────────────────────────────
         self._draw_pagination(layout, total_pages)

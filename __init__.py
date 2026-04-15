@@ -49,6 +49,7 @@ from .operators import (
     export_local,
     show_catalog,
     pagination_operators,
+    toggle_favorite,
 )
 
 # UI
@@ -79,6 +80,7 @@ classes = (
     update_asset.ASSETMANAGER_OT_update,
     delete_asset.ASSETMANAGER_OT_delete,
     load_asset.ASSETMANAGER_OT_load_from_db,
+    load_asset.ASSETMANAGER_OT_load_from_db_deferred,
     import_local.ASSETMANAGER_OT_import_local,
     export_local.ASSETMANAGER_OT_export_local,
     show_catalog.ASSETMANAGER_OT_show_catalog,
@@ -87,6 +89,9 @@ classes = (
     show_catalog.ASSETMANAGER_OT_catalog_prev_page,
     show_catalog.ASSETMANAGER_OT_catalog_next_page,
     show_catalog.ASSETMANAGER_OT_catalog_last_page,
+    
+    # Toggle Favorite
+    toggle_favorite.ASSETMANAGER_OT_toggle_favorite,
     
     # Pagination Operators
     pagination_operators.ASSETMANAGER_OT_next_page,
@@ -103,11 +108,11 @@ classes = (
     
     # Panels
     ASSETMANAGER_PT_panel,
+    ASSETMANAGER_PT_management,
     ASSETMANAGER_PT_browse,
     ASSETMANAGER_PT_details,
     ASSETMANAGER_PT_filters,
     ASSETMANAGER_PT_quick_filters,
-    ASSETMANAGER_PT_management,
 )
 
 
@@ -185,14 +190,35 @@ def register():
         except Exception as e:
             print(f"[AssetManager] Failed to register {cls}: {e}")
     
-    # Initialize directories
+    # Initialize directories (bpy is ready here — safe to call)
     init_directories()
+    
+    # Cleanup temp files now that bpy is ready
+    try:
+        from .core.paths import cleanup_temp_files
+        cleanup_temp_files()
+    except Exception as e:
+        print(f"[AssetManager] Temp cleanup warning: {e}")
     
     # Initialize scene properties
     init_scene_properties()
     
-    # Initialize database
+    # Initialize database (migration-safe)
     init_db()
+    
+    # Quick integrity check on startup (prints warnings, does not block)
+    try:
+        from .core.database import db_check_integrity
+        report = db_check_integrity()
+        if not report.get('ok'):
+            print(f"[AssetManager] ⚠️  DB integrity issue: {report.get('integrity')}")
+        orphans = report.get('orphaned_files', [])
+        if orphans:
+            print(f"[AssetManager] ⚠️  {len(orphans)} assets have missing export files: "
+                  f"{[o['name'] for o in orphans]}")
+        print(f"[AssetManager] DB check: {report.get('total_assets', 0)} assets, integrity={report.get('integrity')}")
+    except Exception as e:
+        print(f"[AssetManager] DB check warning: {e}")
     
     # Register handler for file load
     if assetmanager_on_load not in bpy.app.handlers.load_post:

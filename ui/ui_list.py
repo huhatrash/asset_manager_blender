@@ -42,18 +42,15 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             
             # Right: Stats
             col = split.column()
-            col.alignment = 'RIGHT'
+            row_stats = col.row(align=True)
+            row_stats.alignment = 'RIGHT'
             
-            # Format polygon count
-            poly_count = item.poly_count
-            if poly_count >= 1000000:
-                poly_str = f"{poly_count / 1000000:.1f}M"
-            elif poly_count >= 1000:
-                poly_str = f"{poly_count / 1000:.0f}K"
-            else:
-                poly_str = str(poly_count)
+            row_stats.separator(factor=0.5)
             
-            col.label(text=poly_str, icon='MESH_DATA')
+            # Favorite star at the far right
+            fav_icon = 'SOLO_ON' if item.is_favorite else 'SOLO_OFF'
+            op = row_stats.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
+            op.asset_id = item.id
             
         elif self.layout_type == 'GRID':
             layout.alignment = 'CENTER'
@@ -67,8 +64,16 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             else:
                 layout.label(text="", icon='FILE_3D')
             
-            # Asset name
-            layout.label(text=item.name)
+            # Asset name and Favorite
+            row = layout.row(align=True)
+            row.alignment = 'CENTER'
+            row.label(text=item.name)
+            
+            row.separator(factor=0.2)
+            
+            fav_icon = 'SOLO_ON' if item.is_favorite else 'SOLO_OFF'
+            op = row.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
+            op.asset_id = item.id
     
     def _get_preview_icon(self, item):
         """Get preview icon ID for an asset item"""
@@ -131,6 +136,11 @@ class ASSETMANAGER_UL_list_compact(bpy.types.UIList):
             cat_icon = category_icons.get(item.category, 'MESH_CUBE')
             
             row.label(text=item.name, icon=cat_icon)
+            
+            row.separator(factor=1.0)
+            fav_icon = 'SOLO_ON' if item.is_favorite else 'SOLO_OFF'
+            op = row.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
+            op.asset_id = item.id
             
             size_mb = item.file_size / (1024 * 1024)
             row.label(text=f"{size_mb:.1f}MB")

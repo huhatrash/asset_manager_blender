@@ -149,17 +149,21 @@ def get_config_path():
 
 
 # =====================================================
-# CONVENIENCE CONSTANTS (for backward compatibility)
+# CONVENIENCE ACCESSORS (backward compatibility)
 # =====================================================
+# IMPORTANT: These are *functions*, not module-level constants.
+# Calling bpy.utils.user_resource() at import time (before Blender is
+# fully initialised) can return the wrong path, making the database
+# appear empty.  Always call the functions; never cache the results at
+# module scope.
 
-# Legacy constants - use functions above instead
-ADDON_DIR = get_addon_dir()
-DATA_DIR = get_data_dir()
-EXPORTS_DIR = get_exports_dir()
-THUMBS_DIR = get_thumbnails_dir()
-DB_PATH = get_database_path()
-TEMP_DIR = get_temp_dir()
-BACKUPS_DIR = get_backups_dir()
+def ADDON_DIR():    return get_addon_dir()
+def DATA_DIR():     return get_data_dir()
+def EXPORTS_DIR():  return get_exports_dir()
+def THUMBS_DIR():   return get_thumbnails_dir()
+def DB_PATH():      return get_database_path()
+def TEMP_DIR():     return get_temp_dir()
+def BACKUPS_DIR():  return get_backups_dir()
 
 
 # =====================================================
@@ -438,9 +442,6 @@ def is_valid_asset_path(filepath):
 # AUTO CLEANUP ON MODULE LOAD
 # =====================================================
 
-# Clean up temp files on module import
-if __name__ != "__main__":
-    try:
-        cleanup_temp_files()
-    except:
-        pass
+# NOTE: Temp cleanup is intentionally NOT called at module import time.
+# It is called explicitly from register() in __init__.py to ensure
+# bpy is fully ready before any path resolution occurs.

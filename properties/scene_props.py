@@ -99,6 +99,13 @@ class AssetItem(bpy.types.PropertyGroup):
         description="Preview collection key",
         default=""
     )
+    
+    # State tracking
+    is_favorite: bpy.props.BoolProperty(
+        name="Favorite",
+        description="Is this asset marked as a favorite",
+        default=False
+    )
 
 
 # =====================================================
@@ -148,9 +155,16 @@ def init_scene_properties():
     )
     
     bpy.types.Scene.show_advanced_filters = bpy.props.BoolProperty(
-    name="Show Advanced Filters",
-    description="Toggle advanced filter options",
-    default=False  
+        name="Show Advanced Filters",
+        description="Toggle advanced filter options",
+        default=False  
+    )
+    
+    bpy.types.Scene.filter_favorites = bpy.props.BoolProperty(
+        name="Favorites Only",
+        description="Show only favorite assets",
+        default=False,
+        update=lambda self, context: on_filter_update(context)
     )
     
     # Advanced filters
@@ -283,6 +297,7 @@ def clear_scene_properties():
         "filter_max_size",
         "filter_min_poly",
         "filter_max_poly",
+        "filter_favorites",
         
         # Pagination
         "asset_total_count",

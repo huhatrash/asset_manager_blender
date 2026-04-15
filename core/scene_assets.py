@@ -34,6 +34,7 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
     # Get filter parameters from scene
     category = getattr(scene, "asset_category", 'ALL')
     search = getattr(scene, "asset_search", "")
+    filter_favorites = getattr(scene, "filter_favorites", False)
     sort_by = getattr(scene, "asset_sort_by", 'created_at')
     sort_order = getattr(scene, "asset_sort_order", 'DESC')
     
@@ -47,7 +48,8 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
         category=category,
         search=search,
         sort_by=sort_by,
-        sort_order=sort_order
+        sort_order=sort_order,
+        filter_favorites=filter_favorites
     )
     
     # Store pagination state in scene
@@ -77,6 +79,7 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
         
         item.created_at = a.get("created_at") or ""
         item.updated_at = a.get("updated_at") or ""
+        item.is_favorite = bool(a.get("is_favorite"))
         
         # PERBAIKI INI: Simpan thumbnail_path dari database, bukan key
         item.preview_icon = a.get("thumbnail_path") or ""  # Path thumbnail dari DB
@@ -112,6 +115,7 @@ def load_assets_with_filters(context):
     max_size = getattr(scene, "filter_max_size", 0)
     min_poly = getattr(scene, "filter_min_poly", 0)
     max_poly = getattr(scene, "filter_max_poly", 0)
+    filter_favorites = getattr(scene, "filter_favorites", False)
     
     # Clear existing
     scene.asset_items.clear()
@@ -124,7 +128,8 @@ def load_assets_with_filters(context):
         max_size=max_size,
         min_poly=min_poly,
         max_poly=max_poly,
-        limit=1000  # Max results for advanced search
+        limit=1000,  # Max results for advanced search
+        filter_favorites=filter_favorites
     )
     
     # Update scene state
@@ -149,6 +154,7 @@ def load_assets_with_filters(context):
         item.faces = a.get("faces") or 0
         item.created_at = a.get("created_at") or ""
         item.updated_at = a.get("updated_at") or ""
+        item.is_favorite = bool(a.get("is_favorite"))
         item.preview_icon = a.get("thumbnail_path") or "" 
     
     if len(scene.asset_items) > 0:
@@ -195,6 +201,7 @@ def update_single_asset_in_scene(context, asset_id):
             item.vertices = updated.get("vertices") or 0
             item.faces = updated.get("faces") or 0
             item.updated_at = updated.get("updated_at") or ""
+            item.is_favorite = bool(updated.get("is_favorite"))
             item.preview_icon = updated.get("thumbnail_path") or "" 
             
             found = True
@@ -238,6 +245,7 @@ def add_single_asset_to_scene(context, asset_id):
     item.faces = asset.get("faces") or 0
     item.created_at = asset.get("created_at") or ""
     item.updated_at = asset.get("updated_at") or ""
+    item.is_favorite = bool(asset.get("is_favorite"))
     item.preview_icon = asset.get("thumbnail_path") or ""
     
     # Move to top (most recent)
@@ -395,8 +403,9 @@ def on_filter_changed(context):
     max_size = getattr(scene, "filter_max_size", 0)
     min_poly = getattr(scene, "filter_min_poly", 0)
     max_poly = getattr(scene, "filter_max_poly", 0)
+    filter_favorites = getattr(scene, "filter_favorites", False)
     
-    has_advanced_filters = any([min_size, max_size, min_poly, max_poly])
+    has_advanced_filters = any([min_size, max_size, min_poly, max_poly, filter_favorites])
     
     if has_advanced_filters:
         # Use advanced search (no pagination)

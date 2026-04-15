@@ -208,17 +208,17 @@ def _create_studio_lighting(scene, center, distance):
     # DI SINI CARA MENGATURNYA! Ubah angka "Watt" ini jika masih keputihan/gelap.
     # Nilainya saya buat standar (SOFT) agar "tidak terlalu terang"
     # ==============================================================
-    BASE_KEY_LIGHT   = 1500    # Lampu Utama (Kanan Atas)
-    BASE_FILL_LIGHT  = 800     # Lampu Tambahan (Kiri) agar bayangan tidak gelap buta
-    BASE_RIM_LIGHT   = 1200    # Lampu Belakang (Siluet)
-    BASE_AMBIENT     = 500     # Cahaya Merata dari depan atas
+    BASE_KEY_LIGHT   = 200   # Lampu Utama (Kanan Atas)
+    BASE_FILL_LIGHT  = 1000    # Lampu Tambahan (Kiri) agar bayangan tidak gelap buta
+    BASE_RIM_LIGHT   = 1000    # Lampu Belakang (Siluet)
+    BASE_AMBIENT     = 100   # Cahaya Merata dari depan atas
     # ==============================================================
     
     lights = []
     
     # Skala pembesaran cahaya linear agar tidak meledak (not "terang sekali")
     # Jika objeknya besar, cahaya perlahan membesar.
-    scale_factor = max(distance / 2.5, 0.5)
+    scale_factor = max(distance / 2.5, 1.5)
     
     # 1. KEY LIGHT
     key_data = bpy.data.lights.new(name="_TempKeyLight", type='AREA')
