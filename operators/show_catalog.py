@@ -1,6 +1,33 @@
 import bpy
 from bpy.props import IntProperty, EnumProperty, StringProperty, BoolProperty
 
+# Module-level reference to the active catalog operator (set on invoke)
+# This is also used by pagination operators (_get_catalog_op)
+_CATALOG_REF: list = []
+
+def _get_catalog_op():
+    """Return the currently open catalog operator instance."""
+    return _CATALOG_REF[0] if _CATALOG_REF else None
+
+def _scheduled_reload():
+    """Called by bpy.app.timers to reload the catalog and force redraw."""
+    op = _get_catalog_op()
+    if op:
+        op.current_page = 0
+        op._load_page()
+    for wm in bpy.data.window_managers:
+        for window in wm.windows:
+            for area in window.screen.areas:
+                area.tag_redraw()
+    return None  # don't repeat
+
+def _filter_update(self, context):
+    """Prop update callback: schedule a catalog reload via timer."""
+    # Debounce: cancel any pending reload, then re-schedule
+    if bpy.app.timers.is_registered(_scheduled_reload):
+        bpy.app.timers.unregister(_scheduled_reload)
+    bpy.app.timers.register(_scheduled_reload, first_interval=0.25)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CATALOG OPERATOR — modern grid layout, working prev/next
@@ -26,6 +53,7 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         description="Filter assets by name",
         default="",
         options={'TEXTEDIT_UPDATE'},
+        update=_filter_update,
     )
 
     category_filter: EnumProperty(
@@ -38,12 +66,14 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
             ('props',       'Props',          '', 'OBJECT_DATA',   4),
         ],
         default='ALL',
+        update=_filter_update,
     )
     
     filter_favorites: BoolProperty(
         name="Show Favorites",
         description="Show only favorite assets",
-        default=False
+        default=False,
+        update=_filter_update,
     )
 
     # ── Internal helpers ─────────────────────────────────────────────────────
@@ -82,7 +112,7 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         self._load_page()
         # invoke_props_dialog gives a proper modal dialog with OK/Cancel
         # width=960 gives a comfortable 4-column grid
-        return context.window_manager.invoke_props_dialog(self, width=900)
+        return context.window_manager.invoke_props_dialog(self, width=790)
 
     def draw(self, context):
         layout = self.layout
@@ -207,9 +237,14 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
 
             col = card.column(align=True)
 
-            # --- TOP BAR: tombol checkbox depress=biru saat selected ---
+            # --- TOP BAR: Category & Checkbox ---
             top_row = col.row(align=True)
 
+            # Category paling kiri
+            cat_str = asset.get('category', 'model').lower()
+            top_row.label(text=cat_str.capitalize())
+
+            # Checkbox di kanan category
             if asset_is_selected:
                 op_chk = top_row.operator(
                     "assetmanager.batch_toggle_select",
@@ -224,26 +259,9 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
                 )
             op_chk.asset_id = asset['id']
 
-            # Name + Star
-            right_split = top_row.split(factor=0.80, align=True)
-
-            name_col = right_split.column()
-            name_col.alignment = 'LEFT'
-            name = asset.get('name', 'Unknown')
-            if len(name) > 14:
-                name = name[:12] + "..."
-            name_col.label(text=name)
-
-            star_col = right_split.column()
-            star_col.alignment = 'RIGHT'
-            is_fav   = bool(asset.get('is_favorite', 0))
-            fav_icon = 'SOLO_ON' if is_fav else 'SOLO_OFF'
-            op_fav   = star_col.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
-            op_fav.asset_id = asset['id']
-
             # ================= THUMBNAIL AREA =================
             thumb_wrap = col.box()  # bikin section khusus
-            thumb_wrap.scale_y = 1.0
+            thumb_wrap.scale_y = 0.8
 
             thumb = thumb_wrap.row()
             thumb.alignment = 'CENTER'
@@ -253,35 +271,45 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
             if key in self._previews:
                 thumb.template_icon(
                     icon_value=self._previews[key].icon_id,
-                    scale=9  # lebih besar = lebih modern
+                    scale=10  # lebih besar = lebih modern
                 )
             else:
                 thumb.label(text="", icon='IMAGE_DATA')
 
-            col.separator()
-
-            # ================= TEXT AREA (Category) =================
-            text_col = col.column(align=True)
-            text_col.scale_y = 0.9
-
-            cat_row = text_col.row()
-            cat_row.alignment = 'CENTER'
-            cat_row.scale_y = 0.75
-            cat_row.label(text=asset.get('category', '').upper())
+            # ================= NAME INSIDE THUMBNAIL BOX =================
+            name_row = thumb_wrap.row()
+            name_row.alignment = 'CENTER'
+            name_row.scale_y = 1.2
+            name = asset.get('name', 'Unknown')
+            if len(name) > 16:
+                name = name[:14] + "..."
+            name_row.label(text=name.upper())
 
             col.separator()
 
-            # ================= BUTTON =================
-            btn = col.row()
-            btn.scale_y = 1.0
+            # ================= BOTTOM ROW (Button & Star) =================
+            bot_split = col.split(factor=0.85, align=True)
+            bot_split.scale_y = 1.2
 
-            op = btn.operator(
+            btn_col = bot_split.column(align=True)
+            op = btn_col.operator(
                 "assetmanager.load_from_db_deferred",
-                text="Load",
-                icon='IMPORT'
+                text="Load to Scene"
             )
             op.asset_id = asset['id']
+
+            star_col = bot_split.column(align=True)
+            is_fav   = bool(asset.get('is_favorite', 0))
+            fav_icon = 'SOLO_ON' if is_fav else 'SOLO_OFF'
+            op_fav   = star_col.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=True)
+            op_fav.asset_id = asset['id']
             
+        # Isikan slot kosong agar card tidak melebar ke seluruh layar 
+        # jika jumlah asset di baris terakhir kurang dari 4
+        remainder = len(self._assets) % 4
+        if remainder > 0:
+            for _ in range(4 - remainder):
+                grid.column()
         layout.separator(factor=1.0)
 
         # ── Pagination bar ────────────────────────────────────────────────────
@@ -358,12 +386,8 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
 #  PAGINATION OPERATORS — these re-call _load_page on the active operator
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_catalog_op():
-    """Return the currently open catalog operator instance (stored as a module-level ref)."""
-    return _CATALOG_REF[0] if _CATALOG_REF else None
-
-# Module-level reference so pagination ops can reach the live operator
-_CATALOG_REF: list = []
+# The OLD _CATALOG_REF and _get_catalog_op definitions are now at the top of the file.
+# This section kept for continuity only.
 
 
 class _CatalogPageBase(bpy.types.Operator):
@@ -464,6 +488,7 @@ _orig_invoke = ASSETMANAGER_OT_show_catalog.invoke
 
 
 def _patched_invoke(self, context, event):
+    """Stores operator ref in _CATALOG_REF so pagination and filter-update callbacks can find it."""
     _CATALOG_REF.clear()
     _CATALOG_REF.append(self)
     return _orig_invoke(self, context, event)
