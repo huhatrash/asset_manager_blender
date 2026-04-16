@@ -50,6 +50,7 @@ from .operators import (
     show_catalog,
     pagination_operators,
     toggle_favorite,
+    batch_operations,
 )
 
 # UI
@@ -85,6 +86,7 @@ classes = (
     export_local.ASSETMANAGER_OT_export_local,
     show_catalog.ASSETMANAGER_OT_show_catalog,
     show_catalog.ASSETMANAGER_OT_catalog_refresh,
+    show_catalog.ASSETMANAGER_OT_catalog_goto_page,
     show_catalog.ASSETMANAGER_OT_catalog_first_page,
     show_catalog.ASSETMANAGER_OT_catalog_prev_page,
     show_catalog.ASSETMANAGER_OT_catalog_next_page,
@@ -92,6 +94,14 @@ classes = (
     
     # Toggle Favorite
     toggle_favorite.ASSETMANAGER_OT_toggle_favorite,
+
+    # Batch Operations
+    batch_operations.ASSETMANAGER_OT_batch_toggle_select,
+    batch_operations.ASSETMANAGER_OT_batch_select_all,
+    batch_operations.ASSETMANAGER_OT_batch_clear_selection,
+    batch_operations.ASSETMANAGER_OT_batch_load,
+    batch_operations.ASSETMANAGER_OT_batch_export,
+    batch_operations.ASSETMANAGER_OT_batch_delete,
     
     # Pagination Operators
     pagination_operators.ASSETMANAGER_OT_next_page,

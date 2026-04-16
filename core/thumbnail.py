@@ -27,6 +27,7 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
     original_camera = scene.camera
     original_active = bpy.context.view_layer.objects.active
     original_selection = [o for o in bpy.context.selected_objects]
+    original_world = scene.world  # Simpan referensi world asli
     
     # Store object visibility
     original_obj_visibility = {}
@@ -35,26 +36,50 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
     
     temp_camera = None
     temp_lights = []  # Multiple lights untuk pencahayaan merata
+    temp_world = None  # World sementara untuk render thumbnail
     
     try:
         # ✅ TRANSPARENT BACKGROUND
         scene.render.film_transparent = True
         
-        # ✅ ISOLASI CAHAYA TOTAL (Konsistensi Penuh)
-        # 1. Matikan World Scene, ganti hitam buta agar HDRI/ambient scene tidak bocor!
-        if not scene.world:
-            scene.world = bpy.data.worlds.new("World")
-        scene.world.use_nodes = True
-        world_nodes = scene.world.node_tree.nodes
+        # ✅ WORLD — Buat world sementara yang terpisah agar world asli tidak berubah
+        temp_world = bpy.data.worlds.new("_TempThumbWorld")
+        temp_world.use_nodes = True
+        world_nodes = temp_world.node_tree.nodes
         world_nodes.clear()
         bg_node = world_nodes.new('ShaderNodeBackground')
-        bg_node.inputs['Color'].default_value = (0, 0, 0, 1) # Hitam Total
+        bg_node.inputs['Color'].default_value = (0, 0, 0, 1)
         bg_node.inputs['Strength'].default_value = 0.0
         output_node = world_nodes.new('ShaderNodeOutputWorld')
-        scene.world.node_tree.links.new(bg_node.outputs[0], output_node.inputs[0])
+        temp_world.node_tree.links.new(bg_node.outputs[0], output_node.inputs[0])
+        scene.world = temp_world  # Pakai world sementara
         
-        # 2. Kembalikan Exposure ke 0.0 agar tidak "terbakar"
-        scene.view_settings.view_transform = 'Standard'
+        # ✅ RENDER ENGINE: Cycles + Denoiser untuk hasil realistis
+        scene.render.engine = 'CYCLES'
+        scene.cycles.samples = 128
+        scene.cycles.use_denoising = True
+        try:
+            scene.cycles.denoiser = 'OPENIMAGEDENOISE'
+        except Exception:
+            pass
+        scene.cycles.max_bounces = 8
+        scene.cycles.diffuse_bounces = 4
+        scene.cycles.glossy_bounces = 4
+        scene.cycles.transmission_bounces = 8
+        scene.cycles.transparent_max_bounces = 8
+        
+        # ✅ TONE MAPPING: Filmic/AgX agar warna tidak terpotong & saturasi terjaga
+        try:
+            scene.view_settings.view_transform = 'AgX'
+        except Exception:
+            try:
+                scene.view_settings.view_transform = 'Filmic'
+            except Exception:
+                scene.view_settings.view_transform = 'Standard'
+        try:
+            scene.view_settings.look = 'None'
+        except Exception:
+            pass
         scene.view_settings.exposure = 0.0
         scene.view_settings.gamma = 1.0
 
@@ -176,6 +201,13 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
             # Restore original camera
             scene.camera = original_camera
             
+            # Restore world asli (sebelum hapus temp_world)
+            scene.world = original_world
+            
+            # Hapus world sementara
+            if temp_world and temp_world.name in bpy.data.worlds:
+                bpy.data.worlds.remove(temp_world)
+            
             # Restore object visibility
             for obj_name, (hide_vp, hide_rn) in original_obj_visibility.items():
                 if obj_name in bpy.data.objects:
@@ -201,77 +233,94 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
 
 def _create_studio_lighting(scene, center, distance):
     """
-    Create professional 3-point studio lighting setup untuk thumbnail.
+    3-point studio lighting dengan rasio yang benar.
+
+    Rasio industri marketplace profesional:
+      Key   : 1.0   — main illumination, warm white, kanan-atas-depan
+      Fill  : 0.20  — softens shadow tanpa menghilangkannya, kiri
+      Rim   : 0.40  — edge separation, belakang atas
+      Ambient: 0.05 — bounce fill sangat lembut dari bawah
+
+    Energi dihitung dari luas penampang objek (distance²) bukan linear,
+    agar tidak meledak pada objek besar.
     """
-    # ==============================================================
-    # 🌟 PENGATURAN TINGKAT KETERANGAN CAHAYA 🌟
-    # DI SINI CARA MENGATURNYA! Ubah angka "Watt" ini jika masih keputihan/gelap.
-    # Nilainya saya buat standar (SOFT) agar "tidak terlalu terang"
-    # ==============================================================
-    BASE_KEY_LIGHT   = 200   # Lampu Utama (Kanan Atas)
-    BASE_FILL_LIGHT  = 1000    # Lampu Tambahan (Kiri) agar bayangan tidak gelap buta
-    BASE_RIM_LIGHT   = 1000    # Lampu Belakang (Siluet)
-    BASE_AMBIENT     = 100   # Cahaya Merata dari depan atas
-    # ==============================================================
-    
     lights = []
-    
-    # Skala pembesaran cahaya linear agar tidak meledak (not "terang sekali")
-    # Jika objeknya besar, cahaya perlahan membesar.
-    scale_factor = max(distance / 2.5, 1.5)
-    
-    # 1. KEY LIGHT
+
+    # Energi dasar dihitung kuadratik (distance sudah merupakan radius objek)
+    # Nilai 40 dipilih agar objek ukuran wajar (~1m) = sekitar 40W per unit
+    energy_base = max(distance * distance * 40.0, 10.0)
+
+    # ── 1. KEY LIGHT ─────────────────────────────────────────────────────────
+    # Warm white, 45° horizontal-kanan & 45° atas, softbox menengah
     key_data = bpy.data.lights.new(name="_TempKeyLight", type='AREA')
-    key_data.energy = BASE_KEY_LIGHT * scale_factor
-    key_data.size = max(4 * scale_factor, 1.0)
-    key_data.color = (1.0, 0.98, 0.95)
-    
+    key_data.energy = energy_base * 1.0
+    key_data.size   = max(distance * 1.5, 0.3)
+    key_data.color  = (1.0, 0.97, 0.93)  # warm white
+
     key_light = bpy.data.objects.new("_TempKeyLight", key_data)
-    key_light.location = center + Vector((distance * 0.9, -distance * 0.6, distance * 0.8))
+    key_light.location = center + Vector((
+         distance * 1.2,    # kanan
+        -distance * 0.8,    # depan
+         distance * 1.0,    # atas
+    ))
     rot_quat = (center - key_light.location).to_track_quat('-Z', 'Y')
     key_light.rotation_euler = rot_quat.to_euler()
     scene.collection.objects.link(key_light)
     lights.append(key_light)
-    
-    # 2. FILL LIGHT
+
+    # ── 2. FILL LIGHT ────────────────────────────────────────────────────────
+    # Cool-neutral, JAUH lebih redup dari key (rasio 1:5)
+    # Softbox besar agar wrap mengelilingi objek dengan lembut
     fill_data = bpy.data.lights.new(name="_TempFillLight", type='AREA')
-    fill_data.energy = BASE_FILL_LIGHT * scale_factor
-    fill_data.size = max(5 * scale_factor, 1.0)
-    fill_data.color = (0.95, 0.95, 1.0)
-    
+    fill_data.energy = energy_base * 0.20
+    fill_data.size   = max(distance * 2.5, 0.5)
+    fill_data.color  = (0.93, 0.95, 1.0)  # slight cool tint
+
     fill_light = bpy.data.objects.new("_TempFillLight", fill_data)
-    fill_light.location = center + Vector((-distance * 0.7, -distance * 0.5, distance * 0.6))
+    fill_light.location = center + Vector((
+        -distance * 1.0,    # kiri
+        -distance * 0.3,    # sedikit depan
+         distance * 0.3,    # setinggi objek
+    ))
     rot_quat = (center - fill_light.location).to_track_quat('-Z', 'Y')
     fill_light.rotation_euler = rot_quat.to_euler()
     scene.collection.objects.link(fill_light)
     lights.append(fill_light)
-    
-    # 3. RIM LIGHT
+
+    # ── 3. RIM / BACK LIGHT ──────────────────────────────────────────────────
+    # Silhouette separation, dari belakang-atas
+    # Kuat cukup untuk edge tapi tidak menerangi permukaan depan
     rim_data = bpy.data.lights.new(name="_TempRimLight", type='AREA')
-    rim_data.energy = BASE_RIM_LIGHT * scale_factor
-    rim_data.size = max(3 * scale_factor, 1.0)
-    rim_data.color = (1.0, 1.0, 1.0)
-    
+    rim_data.energy = energy_base * 0.40
+    rim_data.size   = max(distance * 1.0, 0.3)
+    rim_data.color  = (0.97, 0.98, 1.0)  # neutral cool
+
     rim_light = bpy.data.objects.new("_TempRimLight", rim_data)
-    rim_light.location = center + Vector((-distance * 0.4, distance * 0.8, distance * 0.9))
+    rim_light.location = center + Vector((
+        -distance * 0.2,    # hampir tengah-kiri
+         distance * 1.3,    # belakang
+         distance * 1.2,    # cukup tinggi
+    ))
     rot_quat = (center - rim_light.location).to_track_quat('-Z', 'Y')
     rim_light.rotation_euler = rot_quat.to_euler()
     scene.collection.objects.link(rim_light)
     lights.append(rim_light)
-    
-    # 4. AMBIENT LIGHT
-    ambient_data = bpy.data.lights.new(name="_TempAmbientLight", type='AREA')
-    ambient_data.energy = BASE_AMBIENT * scale_factor
-    ambient_data.size = max(6 * scale_factor, 1.0)
-    ambient_data.color = (1.0, 1.0, 1.0)
-    
-    ambient_light = bpy.data.objects.new("_TempAmbientLight", ambient_data)
-    ambient_light.location = center + Vector((0, 0, distance * 1.2))
-    rot_quat = (center - ambient_light.location).to_track_quat('-Z', 'Y')
-    ambient_light.rotation_euler = rot_quat.to_euler()
-    scene.collection.objects.link(ambient_light)
-    lights.append(ambient_light)
-    
+
+    # ── 4. GROUND BOUNCE ─────────────────────────────────────────────────────
+    # Area light besar dari bawah mensimulasikan bounce cahaya dari lantai
+    # Sangat redup — hanya mengisi shadow terbawah sedikit
+    bounce_data = bpy.data.lights.new(name="_TempBounceLight", type='AREA')
+    bounce_data.energy = energy_base * 0.05
+    bounce_data.size   = max(distance * 4.0, 1.0)
+    bounce_data.color  = (1.0, 1.0, 1.0)
+
+    bounce_light = bpy.data.objects.new("_TempBounceLight", bounce_data)
+    bounce_light.location = center + Vector((0, 0, -distance * 0.8))
+    rot_quat = (center - bounce_light.location).to_track_quat('-Z', 'Y')
+    bounce_light.rotation_euler = rot_quat.to_euler()
+    scene.collection.objects.link(bounce_light)
+    lights.append(bounce_light)
+
     return lights
 
 

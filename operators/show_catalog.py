@@ -106,24 +106,81 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         header.separator(factor=0.4)
 
         # Search + Category in one compact row
-        ctrl_row = header.row(align=True)
-        ctrl_row.prop(self, "search_text",     text="", icon='VIEWZOOM',
-                      placeholder="Search assets…")
-        ctrl_row.separator()
-        ctrl_row.prop(self, "category_filter", text="")
-        ctrl_row.separator()
+        # Use split to prevent inputs from equally dividing the total space
+        split = header.split(factor=0.6, align=True)
+        
+        # Search bar takes 40% of the row
+        split.prop(self, "search_text", text="", icon='VIEWZOOM', placeholder="Search assets…")
+        
+        # The rest of the controls share the remaining 60%
+        right_row = split.row(align=True)
+        right_row.prop(self, "category_filter", text="")
+        
         filter_icon = 'SOLO_ON' if self.filter_favorites else 'SOLO_OFF'
-        ctrl_row.prop(self, "filter_favorites", text="", icon=filter_icon)
-        ctrl_row.separator()
+        right_row.prop(self, "filter_favorites", text="", icon=filter_icon)
+        right_row.separator(factor=0.5)
+        
+        # Items per page with a shorter label
+        right_row.prop(self, "page_size", text="Per Page")
+        right_row.separator(factor=0.5)
+        
         # Refresh
-        ctrl_row.operator("assetmanager.catalog_refresh",
-                          text="", icon='FILE_REFRESH')
+        right_row.operator("assetmanager.catalog_refresh", text="", icon='FILE_REFRESH')
 
         # ── Empty state ───────────────────────────────────────────────────────
         if not self._assets:
             layout.separator()
             layout.label(text="No assets match your search.", icon='INFO')
             return
+
+        layout.separator(factor=0.5)
+
+        # ── Batch toolbar ─────────────────────────────────────────────────────
+        from .batch_operations import get_selected_ids, is_selected
+        selected_ids  = get_selected_ids()
+        n_selected    = len(selected_ids)
+        visible_ids   = [a['id'] for a in self._assets]
+        all_ids_str   = ",".join(str(i) for i in visible_ids)
+        all_selected  = all(is_selected(i) for i in visible_ids) if visible_ids else False
+
+        batch_bar = layout.box()
+        brow = batch_bar.row(align=True)
+
+        # Select/Deselect all toggle
+        sel_icon = 'CHECKBOX_HLT' if all_selected else 'CHECKBOX_DEHLT'
+        op_all = brow.operator(
+            "assetmanager.batch_select_all",
+            text="All" if not all_selected else "None",
+            icon=sel_icon,
+        )
+        op_all.asset_ids = all_ids_str
+        op_all.select    = not all_selected
+
+        if n_selected:
+            brow.separator()
+            brow.label(text=f"{n_selected} selected", icon='INFO')
+            brow.separator()
+
+            # Batch Load
+            brow.operator("assetmanager.batch_load",
+                          text="Load", icon='IMPORT')
+
+            # Batch Export
+            brow.operator("assetmanager.batch_export",
+                          text="Export", icon='EXPORT')
+
+            # Batch Delete (red / alert)
+            del_row = brow.row(align=True)
+            del_row.alert = True
+            del_row.operator("assetmanager.batch_delete",
+                             text="Delete", icon='TRASH')
+
+            # Clear selection
+            brow.separator()
+            brow.operator("assetmanager.batch_clear_selection",
+                          text="", icon='X')
+        else:
+            brow.label(text="Select assets for batch operations")
 
         layout.separator(factor=0.5)
 
@@ -135,38 +192,54 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         )
 
         for asset in self._assets:
-            # OUTER CARD (shadow illusion)
-            cell = grid.column()
+            from .batch_operations import is_selected
+            asset_is_selected = is_selected(asset['id'])
 
-            # spacing atas
+            # OUTER CARD
+            cell = grid.column()
             cell.separator(factor=0.6)
 
             outer = cell.column()
             outer.scale_y = 1.15
 
-            # INNER CARD (actual content)
+            # INNER CARD — no red, warna normal
             card = outer.box()
 
             col = card.column(align=True)
-            
-            # --- TOP BAR (Name Left, Favorite Right) ---
-            top_bar = col.split(factor=0.8, align=True)
-            
-            # Left: Asset Name
-            name_col = top_bar.column()
+
+            # --- TOP BAR: tombol checkbox depress=biru saat selected ---
+            top_row = col.row(align=True)
+
+            if asset_is_selected:
+                op_chk = top_row.operator(
+                    "assetmanager.batch_toggle_select",
+                    text="", icon='CHECKBOX_HLT',
+                    emboss=True, depress=True,
+                )
+            else:
+                op_chk = top_row.operator(
+                    "assetmanager.batch_toggle_select",
+                    text="", icon='CHECKBOX_DEHLT',
+                    emboss=False, depress=False,
+                )
+            op_chk.asset_id = asset['id']
+
+            # Name + Star
+            right_split = top_row.split(factor=0.80, align=True)
+
+            name_col = right_split.column()
             name_col.alignment = 'LEFT'
             name = asset.get('name', 'Unknown')
-            if len(name) > 16:
-                name = name[:14] + "..."
+            if len(name) > 14:
+                name = name[:12] + "..."
             name_col.label(text=name)
-            
-            # Right: Star Toggle
-            star_col = top_bar.column()
+
+            star_col = right_split.column()
             star_col.alignment = 'RIGHT'
-            is_fav = bool(asset.get('is_favorite', 0))
+            is_fav   = bool(asset.get('is_favorite', 0))
             fav_icon = 'SOLO_ON' if is_fav else 'SOLO_OFF'
-            op = star_col.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
-            op.asset_id = asset['id']
+            op_fav   = star_col.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
+            op_fav.asset_id = asset['id']
 
             # ================= THUMBNAIL AREA =================
             thumb_wrap = col.box()  # bikin section khusus
@@ -230,32 +303,51 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
         sub2 = row.row(align=True)
         sub2.enabled = self.current_page > 0
         sub2.operator("assetmanager.catalog_prev_page",
-                      text="Prev", icon='TRIA_LEFT')
+                      text="", icon='TRIA_LEFT')
 
-        # Page indicator (centred label)
         row.separator()
-        row.label(
-            text=f"Page  {self.current_page + 1}  /  {total_pages}  "
-                 f"({self._total:,} total)"
-        )
+
+        # Numbered Pagination
+        pages_row = row.row(align=True)
+        
+        # Calculate window of pages to show
+        window_size = 2 # Show 2 pages before and after current
+        start_page = max(0, self.current_page - window_size)
+        end_page = min(total_pages - 1, self.current_page + window_size)
+
+        if total_pages > 0:
+            # Show first page + ellipsis if needed
+            if start_page > 0:
+                op = pages_row.operator("assetmanager.catalog_goto_page", text="1")
+                op.page = 0
+                if start_page > 1:
+                    pages_row.label(text="...")
+            
+            for p in range(start_page, end_page + 1):
+                is_current = (p == self.current_page)
+                op = pages_row.operator("assetmanager.catalog_goto_page", text=str(p + 1), depress=is_current)
+                op.page = p
+                    
+            # Show last page + ellipsis if needed
+            if end_page < total_pages - 1:
+                if end_page < total_pages - 2:
+                    pages_row.label(text="...")
+                op = pages_row.operator("assetmanager.catalog_goto_page", text=str(total_pages))
+                op.page = total_pages - 1
+
         row.separator()
 
         # Next Page
         sub3 = row.row(align=True)
         sub3.enabled = self.current_page < total_pages - 1
         sub3.operator("assetmanager.catalog_next_page",
-                      text="Next", icon='TRIA_RIGHT')
+                      text="", icon='TRIA_RIGHT')
 
         # Last Page
         sub4 = row.row(align=True)
         sub4.enabled = self.current_page < total_pages - 1
         sub4.operator("assetmanager.catalog_last_page",
                       text="", icon='FF')
-
-        # Page size selector on a separate row
-        ps_row = footer.row(align=True)
-        ps_row.scale_y = 0.8
-        ps_row.prop(self, "page_size", text="Items per page")
 
     def execute(self, context):
         # OK button pressed — nothing to do (load was done in invoke/page ops)
@@ -314,6 +406,17 @@ class ASSETMANAGER_OT_catalog_first_page(_CatalogPageBase):
 
     def execute(self, context):
         return self._navigate(context, 0)
+
+
+class ASSETMANAGER_OT_catalog_goto_page(_CatalogPageBase):
+    bl_idname      = "assetmanager.catalog_goto_page"
+    bl_label       = "Go to Page"
+    bl_description = "Go to a specific page"
+
+    page: IntProperty(default=0)
+
+    def execute(self, context):
+        return self._navigate(context, self.page)
 
 
 class ASSETMANAGER_OT_catalog_prev_page(_CatalogPageBase):
@@ -376,6 +479,7 @@ ASSETMANAGER_OT_show_catalog.invoke = _patched_invoke
 classes = (
     ASSETMANAGER_OT_show_catalog,
     ASSETMANAGER_OT_catalog_refresh,
+    ASSETMANAGER_OT_catalog_goto_page,
     ASSETMANAGER_OT_catalog_first_page,
     ASSETMANAGER_OT_catalog_prev_page,
     ASSETMANAGER_OT_catalog_next_page,
