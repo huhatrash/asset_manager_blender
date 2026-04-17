@@ -200,6 +200,35 @@ def init_scene_properties():
         soft_max=10000000
     )
     
+    bpy.types.Scene.filter_min_vert = bpy.props.IntProperty(
+        name="Min Verts",
+        description="Minimum vertex count",
+        default=0,
+        min=0,
+        soft_max=100000
+    )
+    
+    bpy.types.Scene.filter_max_vert = bpy.props.IntProperty(
+        name="Max Verts",
+        description="Maximum vertex count (0 = no limit)",
+        default=0,
+        min=0,
+        soft_max=10000000
+    )
+    
+    bpy.types.Scene.filter_days_old = bpy.props.EnumProperty(
+        name="Added Last",
+        description="Filter by asset creation time",
+        items=[
+            ('0', 'Any Time', 'Show all assets'),
+            ('1', 'Today', 'Added in the last 24 hours'),
+            ('7', 'Last 7 Days', 'Added in the last week'),
+            ('30', 'Last 30 Days', 'Added in the last month'),
+        ],
+        default='0',
+        update=lambda self, context: on_filter_update(context)
+    )
+    
     # Pagination
     bpy.types.Scene.asset_total_count = bpy.props.IntProperty(
         name="Total Assets",
@@ -230,16 +259,31 @@ def init_scene_properties():
     )
     
     # Sorting
-    bpy.types.Scene.asset_sort_by = bpy.props.StringProperty(
+    bpy.types.Scene.asset_sort_by = bpy.props.EnumProperty(
         name="Sort By",
-        description="Column to sort by",
-        default='created_at'
+        description="Attribute to sort assets by",
+        items=[
+            ('created_at', 'Date Created', 'Sort by creation date'),
+            ('updated_at', 'Date Modified', 'Sort by last update'),
+            ('name', 'Name', 'Sort alphabetically'),
+            ('popularity', 'Most Popular', 'Sort by usage frequency'),
+            ('file_size', 'File Size', 'Sort by weight'),
+            ('poly_count', 'Polygons', 'Sort by complexity'),
+            ('vertices', 'Vertices', 'Sort by vertex count'),
+        ],
+        default='created_at',
+        update=lambda self, context: on_filter_update(context)
     )
     
-    bpy.types.Scene.asset_sort_order = bpy.props.StringProperty(
+    bpy.types.Scene.asset_sort_order = bpy.props.EnumProperty(
         name="Sort Order",
-        description="Sort order (ASC or DESC)",
-        default='DESC'
+        description="Direction of sorting",
+        items=[
+            ('ASC', 'Ascending', 'Smallest/Oldest first'),
+            ('DESC', 'Descending', 'Largest/Newest first'),
+        ],
+        default='DESC',
+        update=lambda self, context: on_filter_update(context)
     )
     
     # Display options
@@ -250,10 +294,10 @@ def init_scene_properties():
     )
 
     bpy.types.Scene.show_pagination_info = bpy.props.BoolProperty(
-    name="Show Pagination Info",
-    description="Display pagination information",
-    default=True
-)
+        name="Show Pagination Info",
+        description="Display pagination information",
+        default=True
+    )
 
 
 # =====================================================
@@ -286,29 +330,33 @@ def clear_scene_properties():
     props = [
         # Collections
         "asset_items",
-        
+
         # Selection
         "asset_index",
-        
+
         # Search & Filter
         "asset_search",
         "asset_category",
+        "show_advanced_filters",
+        "filter_favorites",
         "filter_min_size",
         "filter_max_size",
         "filter_min_poly",
         "filter_max_poly",
-        "filter_favorites",
-        
+        "filter_min_vert",
+        "filter_max_vert",
+        "filter_days_old",
+
         # Pagination
         "asset_total_count",
         "asset_current_page",
         "asset_page_size",
         "asset_total_pages",
-        
+
         # Sorting
         "asset_sort_by",
         "asset_sort_order",
-        
+
         # Display
         "show_thumbnail",
         "show_pagination_info",
@@ -352,16 +400,16 @@ def get_selected_asset(context):
 def get_asset_count(context):
     """
     Get number of assets currently loaded.
-    
+
     Args:
         context: Blender context
-    
+
     Returns:
         int: Number of assets
     """
     scene = context.scene
-    
+
     if hasattr(scene, 'asset_items'):
         return len(scene.asset_items)
-    
+
     return 0

@@ -124,13 +124,38 @@ class ASSETMANAGER_OT_apply_filters(bpy.types.Operator):
     bl_label = "Apply Filters"
     bl_description = "Apply current search and filter settings"
     
+    # Quick filter presets
+    category: bpy.props.StringProperty(default="")
+    min_size: bpy.props.IntProperty(default=-1) # -1 means no change
+    max_size: bpy.props.IntProperty(default=-1)
+    smart_action: bpy.props.StringProperty(default="")
+    
     def execute(self, context):
+        scene = context.scene
+        
+        # Apply presets
+        if self.category:
+            scene.asset_category = self.category
+            
+        if self.min_size != -1:
+            scene.filter_min_size = self.min_size
+            
+        if self.max_size != -1:
+            scene.filter_max_size = self.max_size
+            
+        # Popularity toggle logic
+        if self.smart_action == 'MOST_USED':
+            if scene.asset_sort_by == 'popularity':
+                scene.asset_sort_by = 'created_at' # Back to default
+            else:
+                scene.asset_sort_by = 'popularity'
+                scene.asset_sort_order = 'DESC'
+            
+        # Trigger reload
         on_filter_changed(context)
         
-        scene = context.scene
         total = getattr(scene, "asset_total_count", 0)
-        
-        self.report({'INFO'}, f"Found {total} matching assets")
+        self.report({'INFO'}, f"Filter Applied: Found {total} assets")
         return {'FINISHED'}
 
 
@@ -150,6 +175,11 @@ class ASSETMANAGER_OT_clear_filters(bpy.types.Operator):
         scene.filter_max_size = 0
         scene.filter_min_poly = 0
         scene.filter_max_poly = 0
+        scene.filter_min_vert = 0
+        scene.filter_max_vert = 0
+        scene.filter_days_old = '0'
+        scene.asset_sort_by = 'created_at'
+        scene.asset_sort_order = 'DESC'
         
         # Reload from first page
         on_filter_changed(context)
@@ -236,9 +266,10 @@ class ASSETMANAGER_OT_change_sort(bpy.types.Operator):
             ('created_at', 'Date Created', 'Sort by creation date'),
             ('updated_at', 'Date Modified', 'Sort by last update'),
             ('name', 'Name', 'Sort alphabetically by name'),
-            ('category', 'Category', 'Sort by category'),
+            ('popularity', 'Most Popular', 'Sort by usage frequency'),
             ('file_size', 'File Size', 'Sort by file size'),
             ('poly_count', 'Polygon Count', 'Sort by polygon count'),
+            ('vertices', 'Vertices', 'Sort by vertex count'),
         ],
         default='created_at'
     )
@@ -338,35 +369,6 @@ class ASSETMANAGER_OT_show_statistics(bpy.types.Operator):
         return {'FINISHED'}
 
 
-# =====================================================
-# BATCH OPERATIONS
-# =====================================================
-
-class ASSETMANAGER_OT_select_all(bpy.types.Operator):
-    """Select all assets on current page"""
-    bl_idname = "assetmanager.select_all"
-    bl_label = "Select All"
-    bl_description = "Select all visible assets"
-    
-    def execute(self, context):
-        # This would require adding a 'selected' property to AssetItem
-        # For now, just report
-        scene = context.scene
-        count = len(scene.asset_items)
-        self.report({'INFO'}, f"Would select {count} assets (feature coming soon)")
-        return {'FINISHED'}
-
-
-class ASSETMANAGER_OT_deselect_all(bpy.types.Operator):
-    """Deselect all assets"""
-    bl_idname = "assetmanager.deselect_all"
-    bl_label = "Deselect All"
-    bl_description = "Deselect all assets"
-    
-    def execute(self, context):
-        self.report({'INFO'}, "Deselected all (feature coming soon)")
-        return {'FINISHED'}
-
 
 # =====================================================
 # CLASSES TO REGISTER
@@ -384,8 +386,6 @@ classes = (
     ASSETMANAGER_OT_change_page_size,
     ASSETMANAGER_OT_change_sort,
     ASSETMANAGER_OT_show_statistics,
-    ASSETMANAGER_OT_select_all,
-    ASSETMANAGER_OT_deselect_all,
 )
 
 

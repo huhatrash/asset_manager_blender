@@ -42,7 +42,8 @@ from .properties.scene_props import (
 # Operators
 from .operators import (
     register_asset,
-    update_asset,
+    edit_metadata,
+    update_source,
     delete_asset,
     load_asset,
     import_local,
@@ -59,8 +60,8 @@ from .ui.panel import (
     ASSETMANAGER_PT_browse,
     ASSETMANAGER_PT_details,
     ASSETMANAGER_PT_filters,
-    ASSETMANAGER_PT_quick_filters,
     ASSETMANAGER_PT_management,
+    ASSETMANAGER_PT_recently_used,
 )
 from .ui.ui_list import ASSETMANAGER_UL_list
 
@@ -78,7 +79,8 @@ classes = (
     
     # Main Operators
     register_asset.ASSETMANAGER_OT_register,
-    update_asset.ASSETMANAGER_OT_update,
+    edit_metadata.ASSETMANAGER_OT_edit_metadata,
+    update_source.ASSETMANAGER_OT_update_source,
     delete_asset.ASSETMANAGER_OT_delete,
     load_asset.ASSETMANAGER_OT_load_from_db,
     load_asset.ASSETMANAGER_OT_load_from_db_deferred,
@@ -122,7 +124,7 @@ classes = (
     ASSETMANAGER_PT_browse,
     ASSETMANAGER_PT_details,
     ASSETMANAGER_PT_filters,
-    ASSETMANAGER_PT_quick_filters,
+    ASSETMANAGER_PT_recently_used,
 )
 
 

@@ -30,7 +30,6 @@ def export_selected_to_fbx(obj, output_dir, filename=None):
         filename += '.fbx'
     
     # Get full output path
-    output_path = os.path.join(output_dir, filename)
     output_path = get_unique_filepath(output_dir, filename)
     
     # Store current selection

@@ -79,6 +79,7 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = 'Asset Manager'
     bl_parent_id = "ASSETMANAGER_PT_panel"
+    bl_order = 3
 
     def draw(self, context):
         layout = self.layout
@@ -91,13 +92,11 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
         row.prop(scene, "asset_category", text="")
         
         # Favorites toggle
-        filter_icon = 'SOLO_ON' if scene.filter_favorites else 'SOLO_OFF'
-        row.prop(scene, "filter_favorites", text="", icon=filter_icon)
+        fav_icon = 'SOLO_ON' if scene.filter_favorites else 'SOLO_OFF'
+        row.prop(scene, "filter_favorites", text="", icon=fav_icon)
 
         # Sort toggle (icon only)
-        sort_order = getattr(scene, "asset_sort_order", 'DESC')
-        sort_icon = 'SORT_DESC' if sort_order == 'DESC' else 'SORT_ASC'
-        row.operator("assetmanager.change_sort", text="", icon='PROPERTIES')
+        row.operator("assetmanager.change_sort", text="", icon='SORT_DESC')
 
         # ---- Asset list + preview ----
         split = layout.split(factor=0.50)
@@ -176,11 +175,15 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
             row.scale_y = 1.4
 
             op = row.operator("assetmanager.load_from_db",
-                              text="Load Asset", icon='IMPORT')
+                              text="Load", icon='IMPORT')
             op.asset_id = item.id
 
-            op = row.operator("assetmanager.update",
-                              text="Update", icon='FILE_REFRESH')
+            op = row.operator("assetmanager.edit_metadata",
+                              text="Edit", icon='FILE_TEXT')
+            op.asset_id = item.id
+
+            op = row.operator("assetmanager.update_source",
+                              text="Update Source", icon='FILE_REFRESH')
             op.asset_id = item.id
         else:
             row = layout.row()
@@ -202,6 +205,7 @@ class ASSETMANAGER_PT_details(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = 'Asset Manager'
     bl_parent_id = "ASSETMANAGER_PT_panel"
+    bl_order = 4
 
     def draw(self, context):
         layout = self.layout
@@ -291,6 +295,7 @@ class ASSETMANAGER_PT_filters(bpy.types.Panel):
     bl_category = 'Asset Manager'
     bl_parent_id = "ASSETMANAGER_PT_panel"
     bl_options = {'DEFAULT_CLOSED'}
+    bl_order = 2
 
     def draw(self, context):
         layout = self.layout
@@ -306,14 +311,23 @@ class ASSETMANAGER_PT_filters(bpy.types.Panel):
 
         col.separator(factor=0.5)
 
-        # Polygon range
+        # Polygon & Vertex range
+        col = layout.column(align=True)
         col.prop(scene, "filter_min_poly", text="Min Polys")
         col.prop(scene, "filter_max_poly", text="Max Polys")
+        col.prop(scene, "filter_min_vert", text="Min Verts")
+        col.prop(scene, "filter_max_vert", text="Max Verts")
+
+        layout.separator(factor=0.5)
+        
+        # Date Logic
+        col = layout.column(align=True)
+        col.prop(scene, "filter_days_old", text="Added Last")
 
         layout.separator(factor=0.5)
 
         row = layout.row(align=True)
-        row.scale_y = 1.1
+        row.scale_y = 1.4
         row.operator("assetmanager.apply_filters",
                      text="Apply Filters", icon='FILTER')
         row.operator("assetmanager.clear_filters",
@@ -324,42 +338,117 @@ class ASSETMANAGER_PT_filters(bpy.types.Panel):
 # 4) QUICK FILTERS  — collapsed by default
 # =====================================================
 
-class ASSETMANAGER_PT_quick_filters(bpy.types.Panel):
-    """One-click category & size presets"""
-    bl_label = "Quick Filters"
-    bl_idname = "ASSETMANAGER_PT_quick_filters"
+
+# =====================================================
+# 5.5) RECENTLY USED  — collapsed by default
+# =====================================================
+
+def _relative_time(dt_str):
+    """Return a human-readable relative time string for a datetime string."""
+    import datetime
+    if not dt_str:
+        return "?"
+    try:
+        then = datetime.datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+        diff = datetime.datetime.now() - then
+        secs = int(diff.total_seconds())
+        if secs < 60:
+            return "Just now"
+        elif secs < 3600:
+            return f"{secs // 60}m ago"
+        elif secs < 86400:
+            return f"{secs // 3600}h ago"
+        elif secs < 86400 * 7:
+            return f"{diff.days}d ago"
+        else:
+            return then.strftime("%d %b")
+    except Exception:
+        return dt_str[:10]
+
+
+class ASSETMANAGER_PT_recently_used(bpy.types.Panel):
+    """Show recently loaded assets"""
+    bl_label = "Recently Used"
+    bl_idname = "ASSETMANAGER_PT_recently_used"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'Asset Manager'
     bl_parent_id = "ASSETMANAGER_PT_panel"
     bl_options = {'DEFAULT_CLOSED'}
+    bl_order = 5
 
     def draw(self, context):
+        import os
         layout = self.layout
+        from ..core.database import db_get_recently_used
+        from ..core.preview import get_preview_collection
 
-        # Category row
-        layout.label(text="Category", icon='BOOKMARKS')
-        row = layout.row(align=True)
-        row.operator("assetmanager.apply_filters",
-                     text="Models", icon='MESH_CUBE')
-        row.operator("assetmanager.apply_filters",
-                     text="Chars", icon='ARMATURE_DATA')
-        row.operator("assetmanager.apply_filters",
-                     text="Env", icon='WORLD')
-        row.operator("assetmanager.apply_filters",
-                     text="Props", icon='OBJECT_DATA')
+        recent = db_get_recently_used(limit=10)
 
-        layout.separator(factor=0.3)
+        if not recent:
+            layout.label(text="No history yet.")
+            return
 
-        # Size presets
-        layout.label(text="File Size", icon='FILE')
-        row = layout.row(align=True)
-        row.operator("assetmanager.apply_filters", text="Small (<10 MB)")
-        row.operator("assetmanager.apply_filters", text="Large (>100 MB)")
+        pcoll = get_preview_collection()
+        layout.separator(factor=0.5)
+
+        for asset in recent:
+            asset_id = asset['id']
+            box = layout.box()
+            row = box.row()
+
+            # ── 1. Thumbnail — lazy-load on demand (asset may be on a different page)
+            key = f"asset_{asset.get('uuid', '')}"
+            if key not in pcoll:
+                # Preview not cached yet (asset might be on page 2+) — load it now
+                from ..core.preview import load_preview_for_single_asset
+                load_preview_for_single_asset(asset)
+
+            if key in pcoll:
+                row.template_icon(icon_value=pcoll[key].icon_id, scale=3.2)
+            else:
+                col_icon = row.column()
+                col_icon.scale_y = 2.5
+                col_icon.label(text="", icon='IMAGE_DATA')
+
+
+            # ── 2. Clickable Info area (Right side)
+            col = row.column(align=True)
+            col.alignment = 'LEFT'
+            
+            # Name
+            name = asset.get('name', 'Unknown')
+            r1 = col.row()
+            r1.alignment = 'LEFT'
+            op1 = r1.operator("assetmanager.load_from_db", text=name, emboss=False)
+            op1.asset_id = asset_id
+            
+            col.separator(factor=0.3)
+
+            # Source Blend File
+            source = asset.get('source_file', '')
+            s_name = os.path.basename(source) if source else "Unsaved Scene"
+            if len(s_name) > 24: s_name = s_name[:22] + "..."
+            
+            r2 = col.row()
+            r2.alignment = 'LEFT'
+            r2.scale_y = 0.8
+            r2.enabled = False # Subtle look for metadata
+            op2 = r2.operator("assetmanager.load_from_db", text=s_name, emboss=False)
+            op2.asset_id = asset_id
+            
+            # Time Relative
+            time_str = _relative_time(asset.get('used_at', ''))
+            r3 = col.row()
+            r3.alignment = 'LEFT'
+            r3.scale_y = 0.8
+            r3.enabled = False # Subtle look for metadata
+            op3 = r3.operator("assetmanager.load_from_db", text=time_str, emboss=False)
+            op3.asset_id = asset_id
 
 
 # =====================================================
-# 5) LIBRARY MANAGEMENT  — collapsed by default
+# 6) LIBRARY MANAGEMENT  — collapsed by default
 # =====================================================
 
 class ASSETMANAGER_PT_management(bpy.types.Panel):
@@ -370,7 +459,7 @@ class ASSETMANAGER_PT_management(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = 'Asset Manager'
     bl_parent_id = "ASSETMANAGER_PT_panel"
-    bl_options = {'DEFAULT_CLOSED'}
+    bl_order = 1
 
     def draw(self, context):
         layout = self.layout
@@ -408,9 +497,9 @@ classes = (
     ASSETMANAGER_PT_panel,
     ASSETMANAGER_PT_management,
     ASSETMANAGER_PT_browse,
-    ASSETMANAGER_PT_details,
     ASSETMANAGER_PT_filters,
-    ASSETMANAGER_PT_quick_filters,
+    ASSETMANAGER_PT_details,
+    ASSETMANAGER_PT_recently_used,
 )
 
 

@@ -13,12 +13,20 @@ class ASSETMANAGER_OT_toggle_favorite(bpy.types.Operator):
     
     def execute(self, context):
         try:
-            # Toggle in database (returns bool, new status)
+            # Toggle in database (returns bool: True = now a favorite)
             new_status = db_toggle_favorite(self.asset_id)
-            
-            # Update memory model so sidebar UI reacts instantly
-            update_single_asset_in_scene(context, self.asset_id)
-            
+
+            # If filtering by favorites, a full reload is needed so the
+            # unfavorited asset disappears from the filtered list immediately.
+            scene = context.scene
+            filter_favorites = getattr(scene, 'filter_favorites', False)
+            if filter_favorites:
+                from ..core.scene_assets import refresh_current_page
+                refresh_current_page(context)
+            else:
+                # Just update the single item in-place (faster)
+                update_single_asset_in_scene(context, self.asset_id)
+
             # Update catalog modal memory directly so it reacts instantly
             try:
                 from .show_catalog import _CATALOG_REF
@@ -30,18 +38,14 @@ class ASSETMANAGER_OT_toggle_favorite(bpy.types.Operator):
                             break
             except Exception:
                 pass
-            
-            # Force redraw to update UI
-            screen = getattr(context, "screen", None)
-            if screen:
-                for area in screen.areas:
-                    if area.type == 'VIEW_3D':
-                        area.tag_redraw()
-            elif context.area:
-                context.area.tag_redraw()
-                
+
+            # Force redraw everywhere
+            for window in context.window_manager.windows:
+                for area in window.screen.areas:
+                    area.tag_redraw()
+
             return {'FINISHED'}
-            
+
         except Exception as e:
             self.report({'ERROR'}, f"Failed to toggle favorite: {str(e)}")
             return {'CANCELLED'}

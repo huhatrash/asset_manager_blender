@@ -118,42 +118,9 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             return 0
 
 
-class ASSETMANAGER_UL_list_compact(bpy.types.UIList):
-    """Compact UIList - no preview icons"""
-    
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        """Draw compact item"""
-        
-        if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            row = layout.row(align=True)
-            
-            category_icons = {
-                'model': 'MESH_CUBE',
-                'character': 'ARMATURE_DATA',
-                'environment': 'WORLD',
-                'props': 'OBJECT_DATA',
-            }
-            cat_icon = category_icons.get(item.category, 'MESH_CUBE')
-            
-            row.label(text=item.name, icon=cat_icon)
-            
-            row.separator(factor=1.0)
-            fav_icon = 'SOLO_ON' if item.is_favorite else 'SOLO_OFF'
-            op = row.operator("assetmanager.toggle_favorite", text="", icon=fav_icon, emboss=False)
-            op.asset_id = item.id
-            
-            size_mb = item.file_size / (1024 * 1024)
-            row.label(text=f"{size_mb:.1f}MB")
-            
-        elif self.layout_type == 'GRID':
-            layout.alignment = 'CENTER'
-            layout.label(text=item.name)
-
-
 # Register
 classes = (
     ASSETMANAGER_UL_list,
-    ASSETMANAGER_UL_list_compact,
 )
 
 def register():

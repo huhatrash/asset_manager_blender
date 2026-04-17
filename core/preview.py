@@ -48,21 +48,14 @@ def clear_previews():
 # LOADING FUNCTIONS
 # =====================================================
 
-def load_preview_for_single_asset(asset):
+def load_preview_for_single_asset(asset, force_reload=False):
     """
     Load preview for a single asset (lazy loading).
-    
-    Args:
-        asset (dict): Asset data with 'uuid' and 'thumbnail_path'
-    
-    Returns:
-        ImagePreview or None: Loaded preview or None if failed
     """
     if not asset:
         return None
     
     pcoll = get_preview_collection()
-    
     key = f"asset_{asset['uuid']}"
     thumbnail_path = asset.get('thumbnail_path')
     
@@ -70,6 +63,13 @@ def load_preview_for_single_asset(asset):
     if not thumbnail_path or not os.path.exists(thumbnail_path):
         return None
     
+    # Safe pop for force reload
+    if force_reload and key in pcoll:
+        try:
+            pcoll.pop(key)
+        except Exception:
+            pass
+            
     # Check if already loaded
     if key in pcoll:
         return pcoll[key]
@@ -79,7 +79,7 @@ def load_preview_for_single_asset(asset):
         preview = pcoll.load(key, thumbnail_path, 'IMAGE')
         return preview
     except Exception as e:
-        print(f"[AssetManager] Failed to load preview for {asset.get('name')}: {e}")
+        print(f"[AssetManager] Failed to load preview: {e}")
         return None
 
 

@@ -30,13 +30,8 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
     bl_label = "Load Asset"
     bl_description = "Import asset file into current scene. Drag to place."
     bl_options = {'REGISTER', 'UNDO'}
-    
+
     asset_id: bpy.props.IntProperty()
-    
-    # Instance variables for modal execution
-    _imported_objects = []
-    _root_objects = []
-    _initial_mouse_pos = (0, 0)
     
     @classmethod
     def poll(cls, context):
@@ -119,6 +114,14 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
         if (event.type == 'LEFTMOUSE' and event.value == 'RELEASE') or event.type == 'RET':
             # Force final update just in case
             self._update_placement(context, event)
+
+            # Record this usage in Recently Used history
+            try:
+                from ..core.database import db_log_usage
+                db_log_usage(self.asset_id, bpy.data.filepath or "")
+            except Exception as _e:
+                pass  # Never block the user; history is non-critical
+
             self.report({'INFO'}, f"Placed {len(self._imported_objects)} object(s).")
             return {'FINISHED'}
             

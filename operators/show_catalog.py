@@ -46,7 +46,7 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
 
     # ── Editable props (survive across pages) ────────────────────────────────
     current_page: IntProperty(default=0, min=0)
-    page_size:    IntProperty(default=16, min=4, max=64)
+    page_size:    IntProperty(default=12, min=4, max=64)
 
     search_text: StringProperty(
         name="Search",
@@ -379,6 +379,8 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
 
     def execute(self, context):
         # OK button pressed — nothing to do (load was done in invoke/page ops)
+        # Clear the global reference so pagination ops don't call into a closed operator
+        _CATALOG_REF.clear()
         return {'FINISHED'}
 
 

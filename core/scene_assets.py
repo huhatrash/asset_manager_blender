@@ -38,6 +38,15 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
     sort_by = getattr(scene, "asset_sort_by", 'created_at')
     sort_order = getattr(scene, "asset_sort_order", 'DESC')
     
+    # Get advanced filter parameters
+    min_size = getattr(scene, "filter_min_size", 0)
+    max_size = getattr(scene, "filter_max_size", 0)
+    min_poly = getattr(scene, "filter_min_poly", 0)
+    max_poly = getattr(scene, "filter_max_poly", 0)
+    min_vert = getattr(scene, "filter_min_vert", 0)
+    max_vert = getattr(scene, "filter_max_vert", 0)
+    days_old = int(getattr(scene, "filter_days_old", '0'))
+    
     # Clear existing items
     scene.asset_items.clear()
     
@@ -49,6 +58,13 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
+        min_size=min_size,
+        max_size=max_size,
+        min_poly=min_poly,
+        max_poly=max_poly,
+        min_vert=min_vert,
+        max_vert=max_vert,
+        days_old=days_old,
         filter_favorites=filter_favorites
     )
     
@@ -93,75 +109,6 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
     load_previews_for_assets(assets)  # assets sudah berisi data dari db_get_paginated
 
     return len(scene.asset_items)
-
-# =====================================================
-# ADVANCED SEARCH & FILTER
-# =====================================================
-
-def load_assets_with_filters(context):
-    """
-    Load assets using advanced filters.
-    Uses db_search_assets() with all filter parameters.
-    """
-    scene = context.scene
-    
-    if not hasattr(scene, "asset_items"):
-        return 0
-    
-    # Get all filter parameters
-    search = getattr(scene, "asset_search", "")
-    category = getattr(scene, "asset_category", 'ALL')
-    min_size = getattr(scene, "filter_min_size", 0)
-    max_size = getattr(scene, "filter_max_size", 0)
-    min_poly = getattr(scene, "filter_min_poly", 0)
-    max_poly = getattr(scene, "filter_max_poly", 0)
-    filter_favorites = getattr(scene, "filter_favorites", False)
-    
-    # Clear existing
-    scene.asset_items.clear()
-    
-    # Get filtered assets
-    assets = db_search_assets(
-        search_term=search,
-        category=category,
-        min_size=min_size,
-        max_size=max_size,
-        min_poly=min_poly,
-        max_poly=max_poly,
-        limit=1000,  # Max results for advanced search
-        filter_favorites=filter_favorites
-    )
-    
-    # Update scene state
-    scene.asset_total_count = len(assets)
-    scene.asset_current_page = 0
-    scene.asset_page_size = len(assets)
-    scene.asset_total_pages = 1
-    
-    # Load to scene
-    for a in assets:
-        item = scene.asset_items.add()
-        
-        item.id = a["id"]
-        item.uuid = a["uuid"]
-        item.name = a.get("name") or ""
-        item.category = a.get("category") or ""
-        item.description = a.get("description") or ""
-        item.file_path = a.get("file_path") or ""
-        item.file_size = a.get("file_size") or 0
-        item.poly_count = a.get("poly_count") or 0
-        item.vertices = a.get("vertices") or 0
-        item.faces = a.get("faces") or 0
-        item.created_at = a.get("created_at") or ""
-        item.updated_at = a.get("updated_at") or ""
-        item.is_favorite = bool(a.get("is_favorite"))
-        item.preview_icon = a.get("thumbnail_path") or "" 
-    
-    if len(scene.asset_items) > 0:
-        scene.asset_index = 0
-    
-    return len(scene.asset_items)
-
 
 # =====================================================
 # SINGLE ASSET OPERATIONS (EFFICIENT)
@@ -398,22 +345,10 @@ def on_filter_changed(context):
     """
     scene = context.scene
     
-    # Check if using advanced filters
-    min_size = getattr(scene, "filter_min_size", 0)
-    max_size = getattr(scene, "filter_max_size", 0)
-    min_poly = getattr(scene, "filter_min_poly", 0)
-    max_poly = getattr(scene, "filter_max_poly", 0)
-    filter_favorites = getattr(scene, "filter_favorites", False)
-    
-    has_advanced_filters = any([min_size, max_size, min_poly, max_poly, filter_favorites])
-    
-    if has_advanced_filters:
-        # Use advanced search (no pagination)
-        load_assets_with_filters(context)
-    else:
-        # Use regular pagination
-        page_size = getattr(scene, "asset_page_size", 10)
-        load_assets_to_scene(context, page=0, page_size=page_size, force_reload=True)
+    # Advanced filters are now perfectly supported by paginated loader
+    page_size = getattr(scene, "asset_page_size", 10)
+    load_assets_to_scene(context, page=0, page_size=page_size, force_reload=True)
+
 
 
 # =====================================================

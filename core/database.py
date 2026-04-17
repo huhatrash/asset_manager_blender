@@ -72,12 +72,7 @@ _REQUIRED_COLUMNS = {
 }
 
 # Optional columns added in v2+ — preserved if already present, created if missing
-_OPTIONAL_COLUMNS = {
-    "tags":         "TEXT DEFAULT ''",
-    "rating":       "INTEGER DEFAULT 0",
-    "usage_count":  "INTEGER DEFAULT 0",
-    "last_used_at": "TEXT",
-}
+_OPTIONAL_COLUMNS = {}
 
 
 def _get_existing_columns(cur, table="assets"):
@@ -104,6 +99,33 @@ def _migrate_schema(conn, cur):
                 print(f"[AssetManager] Migrated: added column '{col_name}'")
             except sqlite3.OperationalError as e:
                 print(f"[AssetManager] Migration warning for '{col_name}': {e}")
+
+    # ── Ensure asset_usage has the correct schema ────────────────────────────
+    # Check if the table exists and has 'used_at'. If the table was created
+    # with an old/partial schema (without used_at), drop and recreate it.
+    # asset_usage is history-only — safe to reset.
+    cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='asset_usage'")
+    usage_exists = cur.fetchone() is not None
+
+    if usage_exists:
+        cur.execute("PRAGMA table_info(asset_usage)")
+        usage_cols = {row[1] for row in cur.fetchall()}
+        if 'used_at' not in usage_cols:
+            cur.execute("DROP TABLE asset_usage")
+            usage_exists = False
+            print("[AssetManager] Migrated: dropped corrupt asset_usage table (missing used_at)")
+
+    if not usage_exists:
+        cur.execute("""
+        CREATE TABLE asset_usage (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_id    INTEGER NOT NULL,
+            used_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            source_file TEXT DEFAULT '',
+            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
+        );
+        """)
+        print("[AssetManager] Migrated: created asset_usage table")
 
 
 # =====================================================
@@ -144,43 +166,22 @@ def init_db():
             created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
 
-            is_favorite     INTEGER NOT NULL DEFAULT 0,
-            tags            TEXT DEFAULT '',
-            rating          INTEGER DEFAULT 0,
-            usage_count     INTEGER DEFAULT 0,
-            last_used_at    TEXT
+            is_favorite     INTEGER NOT NULL DEFAULT 0
         );
         """)
 
-        # ── Auxiliary tables ──────────────────────────────────────────────────
+        # ── Usage history (Recently Used) ─────────────────────────────────────
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS tags (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            tag_name   TEXT NOT NULL UNIQUE,
-            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-        );
-        """)
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS asset_tags (
-            asset_id   INTEGER NOT NULL,
-            tag_id     INTEGER NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-            PRIMARY KEY (asset_id, tag_id),
-            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
-            FOREIGN KEY (tag_id)   REFERENCES tags(id)   ON DELETE CASCADE
-        );
-        """)
-
-        cur.execute("""
-        CREATE TABLE IF NOT EXISTS collections (
+        CREATE TABLE IF NOT EXISTS asset_usage (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            name        TEXT NOT NULL UNIQUE,
-            description TEXT DEFAULT '',
-            color       TEXT DEFAULT '#888888',
-            created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            asset_id    INTEGER NOT NULL,
+            used_at     TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+            source_file TEXT DEFAULT '',
+            FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE
         );
         """)
+
+
 
         # ── Run migration for existing databases ──────────────────────────────
         _migrate_schema(conn, cur)
@@ -246,8 +247,9 @@ def _ensure_indexes(cur):
     # Favorites ordered list
     cur.execute("CREATE INDEX IF NOT EXISTS idx_favorite_updated  ON assets(is_favorite, updated_at DESC);")
 
-    # Tags junction table
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_tags_asset        ON asset_tags(asset_id);")
+    # Usage history
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_usage_asset ON asset_usage(asset_id);")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_usage_time  ON asset_usage(used_at DESC);")
 
 
 def create_table_if_not_exists():
@@ -395,14 +397,15 @@ _VALID_SORT_COLUMNS = {
     'category':    'category',
     'file_size':   'file_size',
     'poly_count':  'poly_count',
-    'rating':      'rating',
-    'usage_count': 'usage_count',
+    'vertices':    'vertices',
+    'popularity':  'use_count',
 }
 
 
 def db_get_paginated(page=0, page_size=10, category='ALL', search='',
                      sort_by='created_at', sort_order='DESC',
                      min_size=0, max_size=0, min_poly=0, max_poly=0,
+                     min_vert=0, max_vert=0, days_old=0,
                      filter_favorites=False):
     """
     Paginated query with filter and sort support.
@@ -444,11 +447,35 @@ def db_get_paginated(page=0, page_size=10, category='ALL', search='',
         if max_poly > 0:
             where_clauses.append("poly_count <= ?")
             params.append(max_poly)
+            
+        if min_vert > 0:
+            where_clauses.append("vertices >= ?")
+            params.append(min_vert)
+
+        if max_vert > 0:
+            where_clauses.append("vertices <= ?")
+            params.append(max_vert)
+            
+        if days_old > 0:
+            where_clauses.append("created_at >= datetime('now', 'localtime', ?)")
+            params.append(f"-{days_old} days")
 
         where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
+        # Popularity join
+        pop_join = ""
+        if sort_by == 'popularity':
+            pop_join = """
+                LEFT JOIN (
+                    SELECT asset_id, COUNT(*) as use_count 
+                    FROM asset_usage GROUP BY asset_id
+                ) u ON assets.id = u.asset_id
+            """
+        else:
+            pop_join = "LEFT JOIN (SELECT NULL as asset_id, 0 as use_count) u ON 1=0"
+
         # Count
-        cur.execute(f"SELECT COUNT(*) FROM assets WHERE {where_sql}", params)
+        cur.execute(f"SELECT COUNT(*) FROM assets {pop_join} WHERE {where_sql}", params)
         total = cur.fetchone()[0]
 
         # Sort
@@ -457,7 +484,9 @@ def db_get_paginated(page=0, page_size=10, category='ALL', search='',
         offset = page * page_size
 
         cur.execute(f"""
-            SELECT * FROM assets
+            SELECT assets.*, IFNULL(u.use_count, 0) as use_count
+            FROM assets
+            {pop_join}
             WHERE {where_sql}
             ORDER BY {sort_col} {order}
             LIMIT ? OFFSET ?
@@ -544,7 +573,7 @@ def db_search_assets(search_term='', category='ALL', min_size=0, max_size=0,
 _UPDATABLE_FIELDS = frozenset({
     'name', 'category', 'description', 'file_path',
     'thumbnail_path', 'file_size', 'poly_count',
-    'vertices', 'faces', 'tags', 'rating',
+    'vertices', 'faces',
 })
 
 
@@ -855,6 +884,67 @@ def db_delete_orphaned_assets():
     except Exception as e:
         conn.rollback()
         print(f"[AssetManager] db_delete_orphaned_assets error: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()
+
+
+# =====================================================
+# RECENTLY USED
+# =====================================================
+
+def db_log_usage(asset_id, source_file=""):
+    """
+    Record that an asset was used (appended/linked).
+    Called automatically by the load operator on successful placement.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO asset_usage (asset_id, used_at, source_file)
+            VALUES (?, datetime('now', 'localtime'), ?)
+        """, (asset_id, source_file or ""))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"[AssetManager] db_log_usage error: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+
+def db_get_recently_used(limit=50):
+    """
+    Return assets that have been used, ordered by most-recent first.
+    Each asset appears only once (latest usage wins).
+
+    Returns:
+        list[dict]: Asset rows with extra 'used_at' and 'source_file' keys.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT
+                a.*,
+                u.used_at,
+                (SELECT source_file FROM asset_usage
+                 WHERE asset_id = a.id
+                 ORDER BY used_at DESC LIMIT 1) AS source_file
+            FROM assets a
+            JOIN (
+                SELECT asset_id, MAX(used_at) AS used_at
+                FROM   asset_usage
+                GROUP  BY asset_id
+            ) u ON a.id = u.asset_id
+            ORDER BY u.used_at DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        print(f"[AssetManager] db_get_recently_used error: {e}")
         return []
     finally:
         cur.close()
