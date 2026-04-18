@@ -10,7 +10,7 @@ import bpy
 import os
 import uuid
 
-from ..core.paths import get_exports_dir, get_thumbnails_dir
+from ..core.paths import get_exports_dir, get_thumbnails_dir, clean_asset_name
 from ..core.export_import import export_selected_with_textures, validate_export_path
 from ..core.thumbnail import render_thumbnail_for_object
 from ..core.database import db_insert_or_update_by_uuid, db_get_by_uuid
@@ -34,6 +34,7 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
         ],
         default='UPDATE'
     )
+    
     
     has_existing_uuid: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
 
@@ -93,9 +94,11 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        """Check if operator can run."""
+        """Check if operator can run. Must have an active, selected mesh object."""
         obj = context.active_object
-        return obj is not None and obj.type == 'MESH'
+        return (obj is not None and 
+                obj.type == 'MESH' and 
+                obj.select_get())
 
     # =====================================================
     # INVOKE
@@ -109,16 +112,26 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             self.report({'WARNING'}, "No active object selected")
             return {'CANCELLED'}
         
+
         # Cek apakah objek ini sudah pernah didaftarkan sebelumnya
-        if "asset_uuid" in obj:
-            self.has_existing_uuid = True
-            self.registration_mode = 'UPDATE'
+        from ..core.database import db_get_by_uuid
+        uuid_detected = obj.get("asset_uuid")
+        
+        if uuid_detected:
+            # Cek juga apakah UUID tersebut benar-benar ada di database
+            existing_in_db = db_get_by_uuid(str(uuid_detected))
+            if existing_in_db:
+                self.has_existing_uuid = True
+                self.registration_mode = 'UPDATE'
+            else:
+                self.has_existing_uuid = False
+                self.registration_mode = 'NEW'
         else:
             self.has_existing_uuid = False
             self.registration_mode = 'NEW'
         
-        # Set default name from object
-        self.asset_name = obj.name
+        # Set default name from object (with Smart Clean Up)
+        self.asset_name = clean_asset_name(obj.name)
         self.description = f"Asset created from '{obj.name}'"
         
         return context.window_manager.invoke_props_dialog(self, width=400)
@@ -131,10 +144,26 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
         """Draw operator properties in dialog."""
         layout = self.layout
         
-        # Tampilkan peringatan jika objek sudah terdaftar
+        # --- SMART NAME CHECK ---
+        primitive_targets = {
+            "Cube", "Plane", "Circle", "Sphere", "Uv Sphere", "Ico Sphere", 
+            "Cylinder", "Cone", "Torus", "Monkey", "Grid"
+        }
+        
+        # Check if current name is a primitive
+        current_name = self.asset_name.strip()
+        is_primitive = current_name in primitive_targets
+        
+        if is_primitive:
+            row = layout.row()
+            row.alert = True
+            row.label(text=f"WARNING: Rename '{current_name}' to something unique!", icon='ERROR')
+            layout.separator(factor=0.5)
+        
+        # Tampilkan pilihan mode jika objek sudah pernah terdaftar di DB
         if self.has_existing_uuid:
             box = layout.box()
-            box.label(text="Objek ini sudah pernah terdaftar!", icon='INFO')
+            box.label(text="This record already exists!", icon='INFO')
             box.prop(self, "registration_mode", expand=True)
             layout.separator()
         
@@ -177,14 +206,27 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
         try:
             # --- PENENTUAN UUID & MODE ---
             if self.has_existing_uuid and self.registration_mode == 'UPDATE':
-                # Skenario 1: Pakai UUID lama untuk menimpa data
-                asset_uuid = obj["asset_uuid"]
+                # Skenario 1: Pakai UUID lama → timpa data yang sudah ada
+                asset_uuid = str(obj["asset_uuid"])
                 db_mode = 'UPDATE'
-            else:
-                # Skenario 2 (atau aset benar-benar baru): Buat UUID baru
+            elif self.has_existing_uuid and self.registration_mode == 'NEW':
+                # Skenario 2: Objek sudah punya UUID di DB, tapi user minta buat aset BARU (Varian).
                 asset_uuid = str(uuid.uuid4())
-                obj["asset_uuid"] = asset_uuid  # Simpan UUID baru ke objek Blender
                 db_mode = 'NEW'
+                obj["asset_uuid_variant"] = asset_uuid
+            else:
+                # Aset belum terdaftar di DB lokal (atau benar-benar baru)
+                original_uuid = obj.get("asset_uuid")
+                if original_uuid:
+                    # Objek punya UUID tapi tidak ada di DB Ubuntu ini.
+                    # Kita gunakan UUID yang sudah ada agar sinkron, tapi mode tetap NEW.
+                    asset_uuid = str(original_uuid)
+                    db_mode = 'NEW'
+                else:
+                    # Benar-benar baru
+                    asset_uuid = str(uuid.uuid4())
+                    obj["asset_uuid"] = asset_uuid
+                    db_mode = 'NEW'
 
             
             # Step 1: Export asset file

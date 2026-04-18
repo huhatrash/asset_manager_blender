@@ -276,10 +276,8 @@ def db_insert_or_update_by_uuid(
     file_size, poly_count, vertices, faces, mode='AUTO'
 ):
     """
-    Fungsi cerdas untuk pendaftaran aset dengan pilihan mode:
-    - 'AUTO': Cek UUID, jika ada UPDATE, jika tidak INSERT (Default lama).
-    - 'NEW': Selalu buat entri baru sebagai Aset 2 (Skenario 2).
-    - 'UPDATE': Paksa perbarui data yang sudah ada berdasarkan UUID.
+    
+    
     """
     conn = get_connection()
     cur = conn.cursor()

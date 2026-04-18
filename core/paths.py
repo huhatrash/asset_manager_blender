@@ -220,6 +220,34 @@ def get_safe_filename(name, extension=""):
     return safe_name
 
 
+def clean_asset_name(name):
+    """
+    Smart Clean Up for asset names:
+    - Removes .001, .002 suffixes
+    - Replaces _ and - with spaces
+    - Applies Title Case
+    
+    Example: "wood_chair.001" -> "Wood Chair"
+    """
+    if not name:
+        return ""
+        
+    import re
+    
+    # 1. Remove Blender suffixes like .001, .002, etc.
+    cleaned = re.sub(r'\.\d{3,}$', '', name)
+    
+    # 2. Replace underscores and dashes with spaces
+    cleaned = cleaned.replace('_', ' ').replace('-', ' ')
+    
+    # 3. Handle Title Case (but preserve acronyms?)
+    # Simple title case is usually best for assets
+    cleaned = cleaned.title()
+    
+    # 4. Final strip
+    return cleaned.strip()
+
+
 def get_unique_filepath(directory, filename):
     """
     Get unique filepath by appending number if file exists.

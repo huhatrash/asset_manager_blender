@@ -25,9 +25,11 @@ class ASSETMANAGER_OT_update_source(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        """Check if operator can run - Must have an active MESH object."""
+        """Check if operator can run - Must have an active, selected MESH object."""
         obj = context.active_object
-        return obj is not None and obj.type == 'MESH'
+        return (obj is not None and 
+                obj.type == 'MESH' and 
+                obj.select_get())
 
     # =====================================================
     # EXECUTE (No Invoke Dialog)

@@ -77,6 +77,12 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
             # This prevents moving a child and its parent and getting double translation.
             self._root_objects = [o for o in self._imported_objects if o.parent not in self._imported_objects]
             
+            # Tag objects with the asset UUID so they are recognized as "already registered"
+            asset_uuid = asset.get('uuid')
+            if asset_uuid:
+                for obj in self._imported_objects:
+                    obj["asset_uuid"] = asset_uuid
+            
             # Immediately try to place at cursor if we are already in View3D (e.g. N-panel)
             self._update_placement(context, event)
 
@@ -110,17 +116,26 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
             return {'CANCELLED'}
             
         # Finish placement on mouse release OR Enter
-        # (Since invoke is trigged on PRESSED, we wait for RELEASE)
         if (event.type == 'LEFTMOUSE' and event.value == 'RELEASE') or event.type == 'RET':
-            # Force final update just in case
+            # Force final update
             self._update_placement(context, event)
 
-            # Record this usage in Recently Used history
+            # Ensure imported objects are selected and one is active
+            if self._imported_objects:
+                for obj in self._imported_objects:
+                    try:
+                        obj.select_set(True)
+                    except ReferenceError:
+                        pass
+                if self._imported_objects[0].name in bpy.data.objects:
+                    context.view_layer.objects.active = self._imported_objects[0]
+
+            # Record usage
             try:
                 from ..core.database import db_log_usage
                 db_log_usage(self.asset_id, bpy.data.filepath or "")
-            except Exception as _e:
-                pass  # Never block the user; history is non-critical
+            except:
+                pass
 
             self.report({'INFO'}, f"Placed {len(self._imported_objects)} object(s).")
             return {'FINISHED'}
