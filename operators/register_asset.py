@@ -25,6 +25,18 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     # Properties
+    registration_mode: bpy.props.EnumProperty(
+        name="Mode",
+        description="Pilih untuk menimpa data lama (Update) atau membuat variasi baru (New)",
+        items=[
+            ('UPDATE', 'Update Existing Asset', 'Timpa data aset yang lama (Skenario 1)'),
+            ('NEW', 'Register as New Asset', 'Buat sebagai aset baru / Aset 2 (Skenario 2)'),
+        ],
+        default='UPDATE'
+    )
+    
+    has_existing_uuid: bpy.props.BoolProperty(default=False, options={'HIDDEN'})
+
     asset_name: bpy.props.StringProperty(
         name="Asset Name",
         description="Name for the asset",
@@ -97,6 +109,14 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             self.report({'WARNING'}, "No active object selected")
             return {'CANCELLED'}
         
+        # Cek apakah objek ini sudah pernah didaftarkan sebelumnya
+        if "asset_uuid" in obj:
+            self.has_existing_uuid = True
+            self.registration_mode = 'UPDATE'
+        else:
+            self.has_existing_uuid = False
+            self.registration_mode = 'NEW'
+        
         # Set default name from object
         self.asset_name = obj.name
         self.description = f"Asset created from '{obj.name}'"
@@ -110,6 +130,13 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
     def draw(self, context):
         """Draw operator properties in dialog."""
         layout = self.layout
+        
+        # Tampilkan peringatan jika objek sudah terdaftar
+        if self.has_existing_uuid:
+            box = layout.box()
+            box.label(text="Objek ini sudah pernah terdaftar!", icon='INFO')
+            box.prop(self, "registration_mode", expand=True)
+            layout.separator()
         
         # Asset Info
         box = layout.box()
@@ -148,8 +175,17 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             return {'CANCELLED'}
 
         try:
-            # ✅ FIX: Generate UUID only ONCE
-            asset_uuid = str(uuid.uuid4())
+            # --- PENENTUAN UUID & MODE ---
+            if self.has_existing_uuid and self.registration_mode == 'UPDATE':
+                # Skenario 1: Pakai UUID lama untuk menimpa data
+                asset_uuid = obj["asset_uuid"]
+                db_mode = 'UPDATE'
+            else:
+                # Skenario 2 (atau aset benar-benar baru): Buat UUID baru
+                asset_uuid = str(uuid.uuid4())
+                obj["asset_uuid"] = asset_uuid  # Simpan UUID baru ke objek Blender
+                db_mode = 'NEW'
+
             
             # Step 1: Export asset file
             self.report({'INFO'}, "Exporting asset...")
@@ -183,7 +219,8 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
                 file_size,
                 stats['poly_count'],
                 stats['vertices'],
-                stats['faces']
+                stats['faces'],
+                mode=db_mode
             )
             
             # Step 5: Update UI & Load Preview

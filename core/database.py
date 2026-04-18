@@ -31,17 +31,24 @@ def get_connection():
     conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
 
-    # WAL mode for concurrent read performance
+    # Mode WAL (Write-Ahead Logging) memungkinkan proses baca & tulis berjalan bersamaan tanpa saling mengunci (locking)
     conn.execute("PRAGMA journal_mode=WAL;")
-    # NORMAL is safe with WAL and much faster than FULL
+    
+    # NORMAL adalah mode sinkronisasi yang cepat namun tetap aman untuk aplikasi desktop
     conn.execute("PRAGMA synchronous=NORMAL;")
-    # Enforce FK constraints
+    
+    # Memastikan integritas relasi antar tabel (Foreign Key) aktif
     conn.execute("PRAGMA foreign_keys=ON;")
-    # 64 MB page cache
+    
+    # Mengalokasikan cache memori sekitar 64MB agar pencarian data lebih instan
     conn.execute("PRAGMA cache_size=-65536;")
-    conn.execute("PRAGMA page_size=4096;")
+    # PRAGMA page_size hanya efektif sebelum database pertama kali dibuat.
+    # Diletakkan di sini hanya sebagai referensi nilai yang digunakan, tidak ada efek pada DB yang sudah ada.
+    
+    # Menggunakan RAM untuk penyimpanan sementara (temp) guna meningkatkan kecepatan query
     conn.execute("PRAGMA temp_store=MEMORY;")
-    # 256 MB memory-mapped IO
+    
+    # Mengaktifkan Memory-Mapped IO sebesar 256MB untuk mempercepat akses file database yang besar
     conn.execute("PRAGMA mmap_size=268435456;")
     conn.execute("PRAGMA locking_mode=NORMAL;")
     conn.execute("PRAGMA auto_vacuum=INCREMENTAL;")
@@ -87,12 +94,15 @@ def _migrate_schema(conn, cur):
     Adds any missing columns; never drops existing ones.
     Safe to call on both fresh and existing databases.
     """
+    # Ambil daftar kolom yang saat ini sudah ada di database user
     existing = _get_existing_columns(cur)
 
     all_needed = {**_REQUIRED_COLUMNS, **_OPTIONAL_COLUMNS}
     for col_name, col_def in all_needed.items():
         if col_name == "id":
-            continue  # PRIMARY KEY cannot be ALTER TABLE'd
+            continue  # Kolom ID tidak bisa ditambah lewat ALTER TABLE
+            
+        # Jika ada kolom di kode yang belum ada di database user, tambahkan otomatis
         if col_name not in existing:
             try:
                 cur.execute(f"ALTER TABLE assets ADD COLUMN {col_name} {col_def}")
@@ -262,52 +272,21 @@ def create_table_if_not_exists():
 # =====================================================
 
 def db_insert_or_update_by_uuid(
-    uuid,
-    name,
-    category,
-    description,
-    file_path,
-    thumbnail_path,
-    file_size,
-    poly_count,
-    vertices,
-    faces
+    uuid, name, category, description, file_path, thumbnail_path,
+    file_size, poly_count, vertices, faces, mode='AUTO'
 ):
     """
-    Insert new asset or update existing one by UUID.
-
-    Returns:
-        bool: True if inserted (new), False if updated (existing)
+    Fungsi cerdas untuk pendaftaran aset dengan pilihan mode:
+    - 'AUTO': Cek UUID, jika ada UPDATE, jika tidak INSERT (Default lama).
+    - 'NEW': Selalu buat entri baru sebagai Aset 2 (Skenario 2).
+    - 'UPDATE': Paksa perbarui data yang sudah ada berdasarkan UUID.
     """
     conn = get_connection()
     cur = conn.cursor()
 
     try:
-        cur.execute("SELECT id FROM assets WHERE uuid = ?", (uuid,))
-        existing = cur.fetchone()
-
-        if existing:
-            cur.execute("""
-                UPDATE assets SET
-                    name=?,
-                    category=?,
-                    description=?,
-                    file_path=?,
-                    thumbnail_path=?,
-                    file_size=?,
-                    poly_count=?,
-                    vertices=?,
-                    faces=?,
-                    updated_at=datetime('now', 'localtime')
-                WHERE uuid=?
-            """, (
-                name, category, description,
-                file_path, thumbnail_path,
-                file_size, poly_count, vertices, faces,
-                uuid
-            ))
-            inserted = False
-        else:
+        if mode == 'NEW':
+            # --- SKENARIO 2: Selalu buat baris baru (Aset 2) ---
             cur.execute("""
                 INSERT INTO assets (
                     uuid, name, category, description,
@@ -324,7 +303,52 @@ def db_insert_or_update_by_uuid(
                 file_path, thumbnail_path,
                 file_size, poly_count, vertices, faces
             ))
+            print(f"[AssetManager] Skenario 2: Terdaftar sebagai aset baru (Aset 2)")
             inserted = True
+
+        else:
+            # Mode AUTO atau UPDATE: Cek keberadaan UUID
+            cur.execute("SELECT id FROM assets WHERE uuid = ?", (uuid,))
+            existing = cur.fetchone()
+
+            # FIX: Hapus kondisi 'mode != NEW' yang redundan karena blok
+            # else ini hanya bisa dicapai jika mode memang bukan 'NEW'.
+            if existing:
+                # --- SKENARIO 1: Update data yang sudah ada ---
+                cur.execute("""
+                    UPDATE assets SET
+                        name=?, category=?, description=?, file_path=?,
+                        thumbnail_path=?, file_size=?, poly_count=?,
+                        vertices=?, faces=?,
+                        updated_at=datetime('now', 'localtime')
+                    WHERE uuid=?
+                """, (
+                    name, category, description, file_path,
+                    thumbnail_path, file_size, poly_count, vertices, faces,
+                    uuid
+                ))
+                print(f"[AssetManager] Skenario 1: Data aset lama diperbarui")
+                inserted = False
+            else:
+                # Mode AUTO: UUID belum ada, buat sebagai aset baru
+                cur.execute("""
+                    INSERT INTO assets (
+                        uuid, name, category, description,
+                        file_path, thumbnail_path,
+                        file_size, poly_count, vertices, faces,
+                        created_at, updated_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        datetime('now', 'localtime'),
+                        datetime('now', 'localtime')
+                    )
+                """, (
+                    uuid, name, category, description,
+                    file_path, thumbnail_path,
+                    file_size, poly_count, vertices, faces
+                ))
+                print(f"[AssetManager] Aset baru terdaftar")
+                inserted = True
 
         conn.commit()
         return inserted
@@ -478,11 +502,12 @@ def db_get_paginated(page=0, page_size=10, category='ALL', search='',
         cur.execute(f"SELECT COUNT(*) FROM assets {pop_join} WHERE {where_sql}", params)
         total = cur.fetchone()[0]
 
-        # Sort
+        # Logika Pagination: OFFSET menentukan mulai dari data keberapa hasil diambil
         sort_col = _VALID_SORT_COLUMNS.get(sort_by, 'created_at')
         order = 'DESC' if sort_order.upper() == 'DESC' else 'ASC'
         offset = page * page_size
 
+        # Mengambil data aset per halaman (LIMIT & OFFSET)
         cur.execute(f"""
             SELECT assets.*, IFNULL(u.use_count, 0) as use_count
             FROM assets
@@ -849,7 +874,8 @@ def db_optimize():
         # VACUUM cannot run inside a transaction; WAL mode is fine
         conn.execute("VACUUM")
         print("[AssetManager] VACUUM complete")
-        conn.execute("PRAGMA incremental_vacuum")
+        # FIX: Tambahkan jumlah halaman (100) agar perilakunya konsisten di semua versi SQLite.
+        conn.execute("PRAGMA incremental_vacuum(100);")
         print("[AssetManager] Incremental vacuum complete")
         print("[AssetManager] Optimization finished")
     except Exception as e:
