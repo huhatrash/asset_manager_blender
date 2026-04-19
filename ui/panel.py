@@ -116,7 +116,8 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
             idx = scene.asset_index
             if 0 <= idx < len(scene.asset_items):
                 item = scene.asset_items[idx]
-                preview_key = f"asset_{item.uuid}"
+                from ..core.preview import get_asset_preview_key
+                preview_key = get_asset_preview_key(item)
                 pcoll = get_preview_collection()
 
                 if preview_key in pcoll:
@@ -383,7 +384,7 @@ class ASSETMANAGER_PT_recently_used(bpy.types.Panel):
         from ..core.database import db_get_recently_used
         from ..core.preview import get_preview_collection
 
-        recent = db_get_recently_used(limit=10)
+        recent = db_get_recently_used(limit=5)
 
         if not recent:
             layout.label(text="No history yet.")
@@ -397,8 +398,9 @@ class ASSETMANAGER_PT_recently_used(bpy.types.Panel):
             box = layout.box()
             row = box.row()
 
-            # ── 1. Thumbnail — lazy-load on demand (asset may be on a different page)
-            key = f"asset_{asset.get('uuid', '')}"
+            # ── 1. Thumbnail — lazy-load on demand
+            from ..core.preview import get_asset_preview_key
+            key = get_asset_preview_key(asset)
             if key not in pcoll:
                 # Preview not cached yet (asset might be on page 2+) — load it now
                 from ..core.preview import load_preview_for_single_asset

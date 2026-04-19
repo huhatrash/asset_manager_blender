@@ -83,11 +83,12 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             if not pcoll:
                 return 0
             
-            # Gunakan UUID sebagai key
-            preview_key = f"asset_{item.uuid}"
+            # Gunakan fungsi terpusat untuk mendapatkan kunci preview
+            from ..core.preview import get_asset_preview_key
+            preview_key = get_asset_preview_key(item)
             
             # Jika sudah ada di cache, langsung return
-            if preview_key in pcoll:
+            if preview_key and preview_key in pcoll:
                 return pcoll[preview_key].icon_id
             
             # ✅ LOAD ON-DEMAND dari thumbnail path yang sudah ada di item

@@ -9,9 +9,9 @@ Version: 2.0 (Optimized for 1000+ assets)
 bl_info = {
     "name": "Local Asset Manager",
     "author": "alfa haliza",
-    "version": (2, 0, 0),
-    "blender": (3, 6, 0),
-    "description": "Professional asset management with support for thousands of assets",
+    "version": (2, 1, 0),
+    "blender": (4, 0, 0),
+    "description": "Professional asset management with support for thousands of assets (Blender 4.x - 5.x)",
     "category": "3D View",
     "doc_url": "",
     "tracker_url": "",

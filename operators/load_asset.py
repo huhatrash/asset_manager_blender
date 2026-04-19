@@ -150,18 +150,24 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
         """Raycast into the 3D viewport under the mouse and move the imported objects."""
         # We need the VIEW_3D context which might be different from where the Operator was invoked (UI Panel)
         area, region = get_view3d_region(context, event)
-        if not area or not region:
-            # If the mouse is not over a 3D view (e.g., still over the UI panel),
-            # we can just leave the objects at the 3D cursor or their origin.
+        if not area or not region or area.type != 'VIEW_3D':
             return
             
-        rv3d = area.spaces.active.region_3d
+        space = area.spaces.active
+        if not space or space.type != 'VIEW_3D':
+            return
+            
+        rv3d = space.region_3d
+        if not rv3d:
+            return
+            
         coord = (event.mouse_x - region.x, event.mouse_y - region.y)
         
         try:
             view_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
             ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
-        except Exception:
+        except Exception as e:
+            # Fallback for invalid projection
             return
             
         depsgraph = context.evaluated_depsgraph_get()

@@ -43,23 +43,44 @@ def export_selected_to_fbx(obj, output_dir, filename=None):
         bpy.context.view_layer.objects.active = obj
         
         # Export FBX
-        bpy.ops.export_scene.fbx(
-            filepath=output_path,
-            use_selection=True,
-            global_scale=1.0,
-            apply_scale_options='FBX_SCALE_NONE',
-            axis_forward='-Z',
-            axis_up='Y',
-            object_types={'MESH'},
-            use_mesh_modifiers=True,
-            mesh_smooth_type='FACE',
-            use_tspace=True,
-            add_leaf_bones=False,
-            primary_bone_axis='Y',
-            secondary_bone_axis='X',
-            path_mode='COPY',
-            embed_textures=True
-        )
+        if bpy.app.version >= (4, 0, 0):
+            # Modern FBX Export (still uses export_scene.fbx but with updated internals)
+            bpy.ops.export_scene.fbx(
+                filepath=output_path,
+                use_selection=True,
+                global_scale=1.0,
+                apply_scale_options='FBX_SCALE_NONE',
+                axis_forward='-Z',
+                axis_up='Y',
+                object_types={'MESH'},
+                use_mesh_modifiers=True,
+                mesh_smooth_type='FACE',
+                use_tspace=True,
+                add_leaf_bones=False,
+                primary_bone_axis='Y',
+                secondary_bone_axis='X',
+                path_mode='COPY',
+                embed_textures=True
+            )
+        else:
+            # Legacy FBX Export
+            bpy.ops.export_scene.fbx(
+                filepath=output_path,
+                use_selection=True,
+                global_scale=1.0,
+                apply_scale_options='FBX_SCALE_NONE',
+                axis_forward='-Z',
+                axis_up='Y',
+                object_types={'MESH'},
+                use_mesh_modifiers=True,
+                mesh_smooth_type='FACE',
+                use_tspace=True,
+                add_leaf_bones=False,
+                primary_bone_axis='Y',
+                secondary_bone_axis='X',
+                path_mode='COPY',
+                embed_textures=True
+            )
         
         # Restore selection
         bpy.ops.object.select_all(action='DESELECT')
@@ -79,6 +100,11 @@ def export_selected_to_fbx(obj, output_dir, filename=None):
     except Exception as e:
         print(f"[AssetManager] Export error: {e}")
         
+        # Cleanup partial file on error
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
+            
         # Restore selection on error
         try:
             bpy.ops.object.select_all(action='DESELECT')
@@ -90,6 +116,148 @@ def export_selected_to_fbx(obj, output_dir, filename=None):
         except:
             pass
         
+        return None
+
+
+def export_selected_to_obj(obj, output_dir, filename=None):
+    """
+    Export selected object to OBJ format.
+    
+    Args:
+        obj (bpy.types.Object): Object to export
+        output_dir (str): Output directory
+        filename (str): Output filename (optional)
+    
+    Returns:
+        str: Path to exported file, or None if failed
+    """
+    if not obj:
+        return None
+    
+    # Generate filename
+    if not filename:
+        filename = get_safe_filename(obj.name, '.obj')
+    elif not filename.endswith('.obj'):
+        filename += '.obj'
+    
+    # Get full output path
+    output_path = get_unique_filepath(output_dir, filename)
+    
+    # Store current selection
+    original_selection = bpy.context.selected_objects.copy()
+    original_active = bpy.context.view_layer.objects.active
+    
+    try:
+        # Select only target object
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        
+        # Export OBJ
+        if bpy.app.version >= (4, 0, 0):
+            # Modern C++ OBJ Export (Blender 4.0+)
+            bpy.ops.wm.obj_export(
+                filepath=output_path,
+                export_selected_objects=True,
+                apply_modifiers=True,
+                export_materials=True,
+                path_mode='COPY'
+            )
+        else:
+            # Legacy OBJ Export
+            bpy.ops.export_scene.obj(
+                filepath=output_path,
+                use_selection=True,
+                use_materials=True,
+                path_mode='COPY'
+            )
+        
+        # Restore selection
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in original_selection:
+            if o:
+                o.select_set(True)
+        if original_active:
+            bpy.context.view_layer.objects.active = original_active
+        
+        if os.path.exists(output_path):
+            print(f"[AssetManager] Exported to: {output_path}")
+            return output_path
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"[AssetManager] OBJ export error: {e}")
+        # Cleanup partial file on error
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
+        return None
+
+
+def export_selected_to_gltf(obj, output_dir, filename=None):
+    """
+    Export selected object to glTF Binary (GLB) format.
+    
+    Args:
+        obj (bpy.types.Object): Object to export
+        output_dir (str): Output directory
+        filename (str): Output filename (optional)
+    
+    Returns:
+        str: Path to exported file, or None if failed
+    """
+    if not obj:
+        return None
+    
+    # Generate filename
+    if not filename:
+        filename = get_safe_filename(obj.name, '.glb')
+    elif not filename.endswith('.glb'):
+        filename += '.glb'
+    
+    # Get full output path
+    output_path = get_unique_filepath(output_dir, filename)
+    
+    # Store current selection
+    original_selection = bpy.context.selected_objects.copy()
+    original_active = bpy.context.view_layer.objects.active
+    
+    try:
+        # Select only target object
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        
+        # glTF/GLB Export
+        bpy.ops.export_scene.gltf(
+            filepath=output_path,
+            use_selection=True,
+            export_format='GLB',
+            export_apply=True,
+            export_image_format='AUTO'
+        )
+        
+        # Restore selection
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in original_selection:
+            if o:
+                o.select_set(True)
+        if original_active:
+            bpy.context.view_layer.objects.active = original_active
+        
+        if os.path.exists(output_path):
+            print(f"[AssetManager] Exported to: {output_path}")
+            return output_path
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"[AssetManager] GLB export error: {e}")
+        # Cleanup partial file on error
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
         return None
 
 
@@ -221,6 +389,11 @@ def export_selected_to_blend(obj, output_dir, filename=None):
     except Exception as e:
         print(f"[AssetManager] Export error: {e}")
         
+        # Cleanup partial file on error
+        if os.path.exists(output_path):
+            try: os.remove(output_path)
+            except: pass
+            
         # Restore selection on error
         try:
             bpy.ops.object.select_all(action='DESELECT')
@@ -259,6 +432,12 @@ def export_selected_with_textures(obj, output_dir, file_format='FBX', force_name
     elif file_format == 'BLEND':
         filename = get_safe_filename(base_name, '.blend')
         return export_selected_to_blend(obj, output_dir, filename)
+    elif file_format == 'OBJ':
+        filename = get_safe_filename(base_name, '.obj')
+        return export_selected_to_obj(obj, output_dir, filename)
+    elif file_format == 'GLTF':
+        filename = get_safe_filename(base_name, '.glb')
+        return export_selected_to_gltf(obj, output_dir, filename)
     else:
         print(f"[AssetManager] Unsupported export format: {file_format}")
         return None
@@ -287,17 +466,25 @@ def import_fbx_file(filepath, use_custom_props=True):
     objects_before = set(bpy.data.objects)
     
     try:
-        bpy.ops.import_scene.fbx(
-            filepath=filepath,
-            use_custom_props=use_custom_props,
-            use_custom_normals=True,
-            use_image_search=True,
-            ignore_leaf_bones=True,
-            force_connect_children=False,
-            automatic_bone_orientation=True,
-            primary_bone_axis='Y',
-            secondary_bone_axis='X'
-        )
+        if bpy.app.version >= (4, 1, 0):
+            # Modern C++ FBX Importer (Blender 4.1+)
+            bpy.ops.wm.fbx_import(
+                filepath=filepath,
+                use_custom_props=use_custom_props
+            )
+        else:
+            # Legacy Python FBX Importer
+            bpy.ops.import_scene.fbx(
+                filepath=filepath,
+                use_custom_props=use_custom_props,
+                use_custom_normals=True,
+                use_image_search=True,
+                ignore_leaf_bones=True,
+                force_connect_children=False,
+                automatic_bone_orientation=True,
+                primary_bone_axis='Y',
+                secondary_bone_axis='X'
+            )
         
         # Get newly imported objects
         objects_after = set(bpy.data.objects)
@@ -404,12 +591,21 @@ def import_obj_file(filepath):
     objects_before = set(bpy.data.objects)
     
     try:
-        bpy.ops.import_scene.obj(
-            filepath=filepath,
-            use_split_objects=True,
-            use_split_groups=False,
-            use_image_search=True
-        )
+        if bpy.app.version >= (4, 0, 0):
+            # Modern C++ OBJ Importer
+            bpy.ops.wm.obj_import(
+                filepath=filepath,
+                import_vertex_groups=True,
+                import_order='DEFAULT'
+            )
+        else:
+            # Legacy Python OBJ Importer
+            bpy.ops.import_scene.obj(
+                filepath=filepath,
+                use_split_objects=True,
+                use_split_groups=False,
+                use_image_search=True
+            )
         
         # Get newly imported objects
         objects_after = set(bpy.data.objects)
@@ -420,6 +616,19 @@ def import_obj_file(filepath):
         
     except Exception as e:
         print(f"[AssetManager] OBJ import error: {e}")
+        return []
+
+
+def import_gltf_file(filepath):
+    """Import glTF/GLB file and return imported objects."""
+    if not os.path.exists(filepath): return []
+    objects_before = set(bpy.data.objects)
+    try:
+        bpy.ops.import_scene.gltf(filepath=filepath)
+        objects_after = set(bpy.data.objects)
+        return list(objects_after - objects_before)
+    except Exception as e:
+        print(f"[AssetManager] GLB import error: {e}")
         return []
 
 
@@ -445,6 +654,8 @@ def import_file_auto(filepath):
         return import_blend_file(filepath)
     elif ext == '.obj':
         return import_obj_file(filepath)
+    elif ext in ('.gltf', '.glb'):
+        return import_gltf_file(filepath)
     else:
         print(f"[AssetManager] Unsupported file format: {ext}")
         return []

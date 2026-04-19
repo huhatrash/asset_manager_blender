@@ -68,14 +68,18 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
         scene.cycles.transmission_bounces = 8
         scene.cycles.transparent_max_bounces = 8
         
-        # ✅ TONE MAPPING: Filmic/AgX agar warna tidak terpotong & saturasi terjaga
+        # ✅ TONE MAPPING: AgX (4.0+) / Filmic (<4.0)
         try:
-            scene.view_settings.view_transform = 'AgX'
+            if bpy.app.version >= (4, 0, 0):
+                scene.view_settings.view_transform = 'AgX'
+            else:
+                scene.view_settings.view_transform = 'Filmic'
         except Exception:
             try:
-                scene.view_settings.view_transform = 'Filmic'
-            except Exception:
                 scene.view_settings.view_transform = 'Standard'
+            except Exception:
+                pass
+        
         try:
             scene.view_settings.look = 'None'
         except Exception:
@@ -343,6 +347,21 @@ def _store_scene_settings(scene):
     if scene.world:
         settings['world_name'] = scene.world.name
     
+    # Cycles specific settings (if engine is Cycles)
+    if 'cycles' in dir(scene):
+        c = scene.cycles
+        settings['cycles'] = {
+            'samples': c.samples,
+            'use_denoising': c.use_denoising,
+            'max_bounces': c.max_bounces,
+            'diffuse_bounces': c.diffuse_bounces,
+            'glossy_bounces': c.glossy_bounces,
+            'transmission_bounces': c.transmission_bounces,
+            'transparent_max_bounces': c.transparent_max_bounces,
+        }
+        try: settings['cycles']['denoiser'] = c.denoiser
+        except: pass
+    
     return settings
 
 
@@ -360,6 +379,20 @@ def _restore_scene_settings(scene, settings):
         scene.view_settings.view_transform = settings['view_transform']
         scene.view_settings.exposure = settings['exposure']
         scene.view_settings.gamma = settings['gamma']
+        if 'cycles' in settings and 'cycles' in dir(scene):
+            c = scene.cycles
+            cs = settings['cycles']
+            c.samples = cs.get('samples', c.samples)
+            c.use_denoising = cs.get('use_denoising', c.use_denoising)
+            c.max_bounces = cs.get('max_bounces', c.max_bounces)
+            c.diffuse_bounces = cs.get('diffuse_bounces', c.diffuse_bounces)
+            c.glossy_bounces = cs.get('glossy_bounces', c.glossy_bounces)
+            c.transmission_bounces = cs.get('transmission_bounces', c.transmission_bounces)
+            c.transparent_max_bounces = cs.get('transparent_max_bounces', c.transparent_max_bounces)
+            
+            if 'denoiser' in cs:
+                try: c.denoiser = cs['denoiser']
+                except: pass
     except Exception as e:
         print(f"[AssetManager] Restore settings error: {e}")
 
@@ -382,9 +415,22 @@ def _ensure_materials_visible(obj):
         nodes = mat.node_tree.nodes
         bsdf = nodes.get('Principled BSDF')
         if bsdf:
-            bsdf.inputs['Base Color'].default_value = (0.8, 0.8, 0.8, 1.0)
-            bsdf.inputs['Roughness'].default_value = 0.5  # Not too shiny
-        
+            # Consistent socket naming for 4.x/5.x
+            # Base Color
+            color_target = ['Base Color', 'Color']
+            for name in color_target:
+                color_input = bsdf.inputs.get(name)
+                if color_input:
+                    color_input.default_value = (0.8, 0.8, 0.8, 1.0)
+                    break
+            
+            # Roughness
+            rough_target = ['Roughness', 'Rough']
+            for name in rough_target:
+                rough_input = bsdf.inputs.get(name)
+                if rough_input:
+                    rough_input.default_value = 0.5
+                    break        
         obj.data.materials.append(mat)
     else:
         for mat in obj.data.materials:

@@ -6,6 +6,7 @@ class ASSETMANAGER_OT_place_asset(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     
     def invoke(self, context, event):
+        
         self.report({'INFO'}, "Invoke called")
         print("Invoke called")
         return {'FINISHED'}

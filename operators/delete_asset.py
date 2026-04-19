@@ -81,8 +81,8 @@ class ASSETMANAGER_OT_delete(bpy.types.Operator):
             # Remove from UI
             remove_single_asset_from_scene(context, self.asset_id)
             
-            # Unload preview
-            unload_preview(asset['uuid'])
+            # Unload preview (pass full asset for versioned key parsing)
+            unload_preview(asset)
             
             # Report result
             msg = f"Deleted asset '{asset_name}'"

@@ -938,6 +938,38 @@ def db_log_usage(asset_id, source_file=""):
         cur.close()
         conn.close()
 
+    # Trim history automatically to keep it performant
+    try:
+        db_trim_usage_history(limit=200)
+    except:
+        pass
+
+
+def db_trim_usage_history(limit=200):
+    """
+    Remove old usage entries to keep the table size under control.
+    Keeps only the 'limit' most recent usage entries.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    try:
+        # Delete entries that are NOT in the top N most recent (by ID)
+        cur.execute(f"""
+            DELETE FROM asset_usage 
+            WHERE id NOT IN (
+                SELECT id FROM asset_usage 
+                ORDER BY used_at DESC, id DESC 
+                LIMIT ?
+            )
+        """, (limit,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"[AssetManager] db_trim_usage_history error: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
 
 def db_get_recently_used(limit=50):
     """

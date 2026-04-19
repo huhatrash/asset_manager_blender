@@ -100,6 +100,12 @@ class AssetItem(bpy.types.PropertyGroup):
         default=""
     )
     
+    preview_version: bpy.props.IntProperty(
+        name="Preview Version",
+        description="Incremental version to force thumbnail refresh",
+        default=0
+    )
+    
     # State tracking
     is_favorite: bpy.props.BoolProperty(
         name="Favorite",

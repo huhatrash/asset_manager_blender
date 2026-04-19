@@ -265,6 +265,7 @@ class ASSETMANAGER_OT_batch_delete(bpy.types.Operator):
 
     def execute(self, context):
         from ..core.database    import db_get_by_id, db_delete_by_id
+        from ..core.scene_assets import remove_single_asset_from_scene, refresh_current_page
         from ..core.preview     import unload_preview
 
         ids = list(_selected_ids)
@@ -288,9 +289,9 @@ class ASSETMANAGER_OT_batch_delete(bpy.types.Operator):
                             except Exception as e:
                                 print(f"[AssetManager] Could not delete file {p}: {e}")
 
-                # Unload preview cache
+                # Unload preview cache (pass full asset to handle versioned keys)
                 try:
-                    unload_preview(asset['uuid'])
+                    unload_preview(asset)
                 except Exception:
                     pass
 
@@ -301,7 +302,8 @@ class ASSETMANAGER_OT_batch_delete(bpy.types.Operator):
 
         msg = f"Deleted {len(ok)} asset(s)"
         if fail:
-            msg += f" | Failed: {len(fail)}"
+            msg += f" | Failed: {len(fail)} items"
+        
         self.report({'INFO'} if not fail else {'WARNING'}, msg)
 
         clear_selection()
@@ -311,6 +313,9 @@ class ASSETMANAGER_OT_batch_delete(bpy.types.Operator):
             if _CATALOG_REF:
                 op = _CATALOG_REF[0]
                 op._load_page()
+            
+            # Sync with Sidebar / N-Panel list
+            refresh_current_page(context)
         except Exception:
             pass
 

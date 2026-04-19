@@ -93,12 +93,14 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
             filter_favorites = self.filter_favorites
         )
 
-        # Reload previews for this page only
+        # Reload previews for this page (with centralized versioning)
         self._previews = {}
+        from ..core.preview import get_asset_preview_key
         for asset in self._assets:
             preview = load_preview_for_single_asset(asset)
             if preview:
-                self._previews[f"asset_{asset['uuid']}"] = preview
+                key = get_asset_preview_key(asset)
+                self._previews[key] = preview
 
     def _total_pages(self) -> int:
         if self._total <= 0:
@@ -266,7 +268,9 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
             thumb = thumb_wrap.row()
             thumb.alignment = 'CENTER'
 
-            key = f"asset_{asset['uuid']}"
+            # Gunakan fungsi terpusat untuk sinkronisasi total
+            from ..core.preview import get_asset_preview_key
+            key = get_asset_preview_key(asset)
 
             if key in self._previews:
                 thumb.template_icon(

@@ -7,6 +7,7 @@ Version: 2.0 (Optimized with Lazy Loading)
 """
 
 import bpy
+from bpy.utils import previews
 import os
 
 # Global preview collection
@@ -27,7 +28,7 @@ def get_preview_collection():
     global _preview_collection
 
     if _preview_collection is None:
-        _preview_collection = bpy.utils.previews.new()
+        _preview_collection = previews.new()
 
     return _preview_collection
 
@@ -40,8 +41,44 @@ def clear_previews():
     global _preview_collection
 
     if _preview_collection:
-        bpy.utils.previews.remove(_preview_collection)
+        previews.remove(_preview_collection)
         _preview_collection = None
+
+
+# =====================================================
+# KEY UTILITY
+# =====================================================
+
+def get_asset_preview_key(asset):
+    """
+    Generate a centralized, versioned icon key for an asset.
+    Handles both Scene PropertyGroups and Database Dictionaries.
+    """
+    if not asset:
+        return ""
+    
+    # 1. Dictionary (from Database)
+    if isinstance(asset, dict):
+        uuid = asset.get('uuid', '')
+        # Use sanitized updated_at as the version for DB items
+        updated_at = asset.get('updated_at', '')
+        if updated_at:
+            version = updated_at.replace(' ', '_').replace(':', '')
+        else:
+            # Fallback to a custom property if it exists
+            version = asset.get('preview_version', 0)
+    
+    # 2. PropertyGroup (from Scene)
+    else:
+        uuid = getattr(asset, 'uuid', '')
+        version = getattr(asset, 'preview_version', 0)
+    
+    if not uuid:
+        return ""
+        
+    # Use double underscores as a "System Separator" to avoid clashing with
+    # single underscores that might exist in UUIDs or version strings.
+    return f"asset__{uuid}__{version}"
 
 
 # =====================================================
@@ -51,24 +88,38 @@ def clear_previews():
 def load_preview_for_single_asset(asset, force_reload=False):
     """
     Load preview for a single asset (lazy loading).
+    Supports versioning to force refresh.
     """
-    if not asset:
-        return None
-    
     pcoll = get_preview_collection()
-    key = f"asset_{asset['uuid']}"
-    thumbnail_path = asset.get('thumbnail_path')
+    key = get_asset_preview_key(asset)
     
-    # Check if thumbnail path exists
+    if not key:
+        return None
+        
+    # Get thumbnail path
+    if isinstance(asset, dict):
+        thumbnail_path = asset.get('thumbnail_path')
+    else:
+        thumbnail_path = getattr(asset, 'preview_icon', '')
+        if not thumbnail_path:
+             thumbnail_path = getattr(asset, 'thumbnail_path', '')
+
     if not thumbnail_path or not os.path.exists(thumbnail_path):
         return None
-    
+
     # Safe pop for force reload
-    if force_reload and key in pcoll:
-        try:
-            pcoll.pop(key)
-        except Exception:
-            pass
+    if force_reload:
+        # Extract UUID from key (asset__UUID__VERSION)
+        if "__" in key:
+            parts = key.split("__")
+            if len(parts) >= 2:
+                uuid = parts[1]
+                prefix = f"asset__{uuid}__"
+                # Remove all versions of this UUID
+                keys_to_remove = [k for k in pcoll.keys() if k.startswith(prefix) or k == f"asset__{uuid}"]
+                for k in keys_to_remove:
+                    try: pcoll.pop(k)
+                    except: pass
             
     # Check if already loaded
     if key in pcoll:
@@ -79,84 +130,30 @@ def load_preview_for_single_asset(asset, force_reload=False):
         preview = pcoll.load(key, thumbnail_path, 'IMAGE')
         return preview
     except Exception as e:
-        print(f"[AssetManager] Failed to load preview: {e}")
+        print(f"[AssetManager] Failed to load preview {key}: {e}")
         return None
 
 
 def load_previews_for_assets(assets):
-    """
-    Load previews for multiple assets.
-    
-    Note: This loads ALL previews immediately. 
-    For large asset libraries (1000+), prefer load_preview_for_single_asset().
-    
-    Args:
-        assets (list): List of asset dictionaries
-    
-    Returns:
-        ImagePreviewCollection: Preview collection with loaded previews
-    """
+    """Load previews for multiple assets (dictionary list)."""
     if not assets:
         return get_preview_collection()
     
-    pcoll = get_preview_collection()
-
     for asset in assets:
-        key = f"asset_{asset['uuid']}"
-        thumbnail_path = asset.get('thumbnail_path')
+        load_preview_for_single_asset(asset)
 
-        # Skip if no path or already loaded
-        if not thumbnail_path:
-            continue
-        
-        if not os.path.exists(thumbnail_path):
-            continue
-
-        if key in pcoll:
-            continue
-
-        # Load preview
-        try:
-            pcoll.load(key, thumbnail_path, 'IMAGE')
-        except Exception as e:
-            print(f"[AssetManager] Failed to load preview {key}: {e}")
-
-    return pcoll
+    return get_preview_collection()
 
 
 def load_previews_batch(assets, start_index=0, count=20):
-    """
-    Load a batch of previews (for pagination).
-    
-    Args:
-        assets (list): List of asset dictionaries
-        start_index (int): Starting index
-        count (int): Number of previews to load
-    
-    Returns:
-        int: Number of previews loaded
-    """
-    pcoll = get_preview_collection()
+    """Load a batch of previews (for pagination)."""
     loaded = 0
-    
     end_index = min(start_index + count, len(assets))
     
     for i in range(start_index, end_index):
-        asset = assets[i]
-        key = f"asset_{asset['uuid']}"
-        thumbnail_path = asset.get('thumbnail_path')
-        
-        if not thumbnail_path or not os.path.exists(thumbnail_path):
-            continue
-        
-        if key in pcoll:
-            continue
-        
-        try:
-            pcoll.load(key, thumbnail_path, 'IMAGE')
+        preview = load_preview_for_single_asset(assets[i])
+        if preview:
             loaded += 1
-        except Exception as e:
-            print(f"[AssetManager] Batch load failed for {key}: {e}")
     
     return loaded
 
@@ -165,18 +162,14 @@ def load_previews_batch(assets, start_index=0, count=20):
 # UNLOADING FUNCTIONS
 # =====================================================
 
-def unload_preview(asset_uuid):
+def unload_preview(asset):
     """
     Unload a specific preview to free memory.
-    
     Args:
-        asset_uuid (str): UUID of asset to unload
-    
-    Returns:
-        bool: True if unloaded, False if not found
+        asset: Asset dictionary or PropertyGroup
     """
     pcoll = get_preview_collection()
-    key = f"asset_{asset_uuid}"
+    key = get_asset_preview_key(asset)
     
     if key in pcoll:
         try:
@@ -186,6 +179,17 @@ def unload_preview(asset_uuid):
             print(f"[AssetManager] Failed to unload preview {key}: {e}")
             return False
     
+    # If key generation failed or key not in pcoll, check by UUID prefix
+    if isinstance(asset, (str, dict)):
+        uuid = asset if isinstance(asset, str) else asset.get('uuid', '')
+        if uuid:
+            prefix = f"asset_{uuid}_"
+            keys_to_remove = [k for k in pcoll.keys() if k.startswith(prefix) or k == f"asset_{uuid}"]
+            for k in keys_to_remove:
+                try: pcoll.pop(k)
+                except: pass
+            return True
+            
     return False
 
 
@@ -210,7 +214,15 @@ def unload_previews_not_in_list(current_uuids):
     # Find keys to remove
     keys_to_remove = []
     for key in pcoll.keys():
-        if key.startswith("asset_"):
+        if key.startswith("asset__"):
+            # Safe extraction using double underscore separator
+            parts = key.split("__")
+            if len(parts) >= 2:
+                uuid = parts[1]
+                if uuid not in current_set:
+                    keys_to_remove.append(key)
+        elif key.startswith("asset_"):
+            # Fallback for old style keys
             uuid = key.replace("asset_", "")
             if uuid not in current_set:
                 keys_to_remove.append(key)
@@ -261,33 +273,34 @@ def clear_all_asset_previews():
 
 def get_preview_by_uuid(asset_uuid):
     """
-    Get preview by asset UUID (if loaded).
-    
-    Args:
-        asset_uuid (str): Asset UUID
-    
-    Returns:
-        ImagePreview or None: Preview if loaded, None otherwise
+    Get preview by asset UUID (finds latest version if available).
     """
     pcoll = get_preview_collection()
-    key = f"asset_{asset_uuid}"
     
-    return pcoll.get(key)
+    # Check for versioned match (new format)
+    prefix_new = f"asset__{asset_uuid}__"
+    for key in pcoll.keys():
+        if key.startswith(prefix_new):
+            return pcoll[key]
+            
+    # Check for versioned match (old format)
+    prefix_old = f"asset_{asset_uuid}_"
+    for key in pcoll.keys():
+        if key.startswith(prefix_old):
+            return pcoll[key]
+
+    # Check for direct match (fallback)
+    key_direct = f"asset_{asset_uuid}"
+    if key_direct in pcoll:
+        return pcoll[key_direct]
+            
+    return None
 
 
-def is_preview_loaded(asset_uuid):
-    """
-    Check if preview is loaded for an asset.
-    
-    Args:
-        asset_uuid (str): Asset UUID
-    
-    Returns:
-        bool: True if loaded, False otherwise
-    """
+def is_preview_loaded(asset):
+    """Check if preview is loaded for an asset."""
     pcoll = get_preview_collection()
-    key = f"asset_{asset_uuid}"
-    
+    key = get_asset_preview_key(asset)
     return key in pcoll
 
 

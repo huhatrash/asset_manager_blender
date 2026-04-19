@@ -151,6 +151,9 @@ def update_single_asset_in_scene(context, asset_id):
             item.is_favorite = bool(updated.get("is_favorite"))
             item.preview_icon = updated.get("thumbnail_path") or "" 
             
+            # Increment version to force thumbnail refresh
+            item.preview_version += 1
+            
             found = True
             break
     

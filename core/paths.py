@@ -148,6 +148,21 @@ def get_config_path():
     return os.path.join(get_data_dir(), "config.json")
 
 
+def get_free_space_mb():
+    """
+    Get free disk space on the data partition in Megabytes.
+    
+    Returns:
+        float: Free space in MB
+    """
+    import shutil
+    try:
+        total, used, free = shutil.disk_usage(get_data_dir())
+        return free / (1024 * 1024)
+    except:
+        return 0.0
+
+
 # =====================================================
 # CONVENIENCE ACCESSORS (backward compatibility)
 # =====================================================
@@ -192,29 +207,39 @@ def ensure_directory_exists(path):
 def get_safe_filename(name, extension=""):
     """
     Convert name to safe filename (remove invalid characters).
-    
-    Args:
-        name (str): Original name
-        extension (str): File extension (with or without dot)
-    
-    Returns:
-        str: Safe filename
+    Enhanced for cross-platform (Windows/Linux/macOS) safety.
     """
     import re
+    if not name:
+        name = "unnamed_asset"
+        
+    # 1. Replace illegal characters with underscore
+    # Covers Windows, macOS, and Linux common illegal chars
+    safe_name = re.sub(r'[<>:"/\\|?*\0]', '_', name)
     
-    # Remove invalid characters
-    safe_name = re.sub(r'[<>:"/\\|?*]', '_', name)
+    # 2. Control characters (non-printable)
+    safe_name = re.sub(r'[\x00-\x1f\x7f]', '_', safe_name)
     
-    # Remove leading/trailing spaces and dots
+    # 3. Handle Windows reserved names (CON, PRN, AUX, NUL, COM1-9, LPT1-9)
+    reserved = r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?$'
+    if re.match(reserved, safe_name, re.IGNORECASE):
+        safe_name = "res_" + safe_name
+        
+    # 4. Remove leading/trailing spaces and dots
     safe_name = safe_name.strip(' .')
     
-    # Limit length
+    # 5. Limit length to prevent OS errors (filesystem limit is usually 255)
     safe_name = safe_name[:200]
     
-    # Add extension
+    # 6. Fallback if empty
+    if not safe_name:
+        safe_name = "asset"
+        
+    # 7. Add extension
     if extension:
         if not extension.startswith('.'):
             extension = '.' + extension
+        # If extension itself is illegal, this might still be weird, but extension usually comes from code
         safe_name += extension
     
     return safe_name
@@ -223,28 +248,39 @@ def get_safe_filename(name, extension=""):
 def clean_asset_name(name):
     """
     Smart Clean Up for asset names:
-    - Removes .001, .002 suffixes
-    - Replaces _ and - with spaces
-    - Applies Title Case
-    
-    Example: "wood_chair.001" -> "Wood Chair"
+    - Removes Blender suffixes like .001, .002
+    - Removes technical tags like _low, _high, _lod, _geo, etc.
+    - Replaces underscores and dashes with spaces
+    - Standardizes to Title Case and removes extra spaces
     """
     if not name:
         return ""
         
     import re
     
-    # 1. Remove Blender suffixes like .001, .002, etc.
-    cleaned = re.sub(r'\.\d{3,}$', '', name)
+    # 1. Remove Blender numeric suffixes (e.g. .001, .01, .0001)
+    cleaned = re.sub(r'\.\d+$', '', name)
     
-    # 2. Replace underscores and dashes with spaces
+    # 2. Remove common technical suffixes at the end (case insensitive)
+    # Pattern: _low, _high, _lod (optional number), _geo, _mesh, _proxy, _collision, _ref
+    tech_pattern = r'(_low|_high|_lod\d?|_geo|_mesh|_proxy|_collision|_ref|low|high)$'
+    cleaned = re.sub(tech_pattern, '', cleaned, flags=re.IGNORECASE)
+    
+    # 3. Handle CamelCase (insert space before capital letters if not beginning)
+    # Example: "WoodTable" -> "Wood Table"
+    cleaned = re.sub(r'(?<!^)(?=[A-Z])', ' ', cleaned)
+    
+    # 4. Replace underscores and dashes with spaces
     cleaned = cleaned.replace('_', ' ').replace('-', ' ')
     
-    # 3. Handle Title Case (but preserve acronyms?)
-    # Simple title case is usually best for assets
+    # 5. Final Formatting: Remove extra spaces and apply Title Case
+    cleaned = " ".join(cleaned.split())
     cleaned = cleaned.title()
     
-    # 4. Final strip
+    # Fallback if name becomes empty after cleaning
+    if not cleaned:
+        return name
+        
     return cleaned.strip()
 
 

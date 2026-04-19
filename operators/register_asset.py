@@ -10,7 +10,13 @@ import bpy
 import os
 import uuid
 
-from ..core.paths import get_exports_dir, get_thumbnails_dir, clean_asset_name
+from ..core.paths import (
+    get_exports_dir, 
+    get_thumbnails_dir, 
+    get_safe_filename,
+    get_free_space_mb,
+    clean_asset_name
+)
 from ..core.export_import import export_selected_with_textures, validate_export_path
 from ..core.thumbnail import render_thumbnail_for_object
 from ..core.database import db_insert_or_update_by_uuid, db_get_by_uuid
@@ -68,6 +74,8 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
         items=[
             ('FBX', 'FBX (.fbx)', 'Export as FBX format'),
             ('BLEND', 'BLEND (.blend)', 'Export as Blender file'),
+            ('OBJ', 'OBJ (.obj)', 'Export as Wavefront OBJ'),
+            ('GLTF', 'GLB (.glb)', 'Export as glTF Binary (GLB)'),
         ],
         default='FBX'
     )
@@ -203,6 +211,17 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             self.report({'ERROR'}, "Asset name cannot be empty")
             return {'CANCELLED'}
 
+        # --- MODE ENFORCEMENT ---
+        # Switch to Object Mode to ensure mesh data can be read/exported correctly
+        if context.active_object and context.active_object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        # --- DISK SPACE VALIDATION ---
+        free_mb = get_free_space_mb()
+        if free_mb < 50.0:
+            self.report({'ERROR'}, f"LOW DISK SPACE ({free_mb:.1f} MB)! Please free up space (min 50MB) before registering.")
+            return {'CANCELLED'}
+
         try:
             # --- PENENTUAN UUID & MODE ---
             if self.has_existing_uuid and self.registration_mode == 'UPDATE':
@@ -268,25 +287,34 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             # Step 5: Update UI & Load Preview
             asset_data = db_get_by_uuid(asset_uuid)
             if asset_data:
-                # Load preview immediately after registration
+                # Load preview immediately after registration (force reload if update)
                 from ..core.preview import load_preview_for_single_asset
-                load_preview_for_single_asset(asset_data)
+                load_preview_for_single_asset(
+                    asset_data, 
+                    force_reload=(db_mode == 'UPDATE')
+                )
                 
                 # Add to scene
                 add_single_asset_to_scene(context, asset_data['id'])
                 
-                # Refresh UI to show preview
-                if context.area:
-                    context.area.tag_redraw()
+                # Refresh ALL areas to show new preview
+                for window in context.window_manager.windows:
+                    for area in window.screen.areas:
+                        area.tag_redraw()
             
-            # Report success
+            # Record success
             action = "registered" if inserted else "updated"
             self.report({'INFO'}, f"Asset '{self.asset_name}' {action} successfully")
             
             return {'FINISHED'}
 
         except Exception as e:
-            self.report({'ERROR'}, f"Registration failed: {str(e)}")
+            error_msg = str(e)
+            # Detect Disk Full (ENOSPC)
+            if "No space left on device" in error_msg or "ENOSPC" in error_msg:
+                self.report({'ERROR'}, "DISK FULL! Please free up space on your device to register assets.")
+            else:
+                self.report({'ERROR'}, f"Registration failed: {error_msg}")
             
             # Log error for debugging
             import traceback
@@ -365,8 +393,12 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
         """
         mesh = obj.data
         
+        # Safe access for Blender 4.x/5.x
+        polygons = getattr(mesh, "polygons", [])
+        vertices = getattr(mesh, "vertices", [])
+        
         return {
-            'poly_count': len(mesh.polygons),
-            'vertices': len(mesh.vertices),
-            'faces': len(mesh.polygons)
+            'poly_count': len(polygons),
+            'vertices': len(vertices),
+            'faces': len(polygons)
         }
