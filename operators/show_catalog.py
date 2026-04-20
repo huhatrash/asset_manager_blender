@@ -239,12 +239,20 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
 
             col = card.column(align=True)
 
+            # --- Check if file exists (using cached check for performance) ---
+            from ..core.paths import safe_file_exists
+            file_exists = safe_file_exists(asset['file_path']) if asset.get('file_path') else False
+
             # --- TOP BAR: Category & Checkbox ---
             top_row = col.row(align=True)
 
             # Category paling kiri
             cat_str = asset.get('category', 'model').lower()
             top_row.label(text=cat_str.capitalize())
+            
+            # Warning icon if missing
+            if not file_exists:
+                top_row.label(text="", icon='ERROR')
 
             # Checkbox di kanan category
             if asset_is_selected:
@@ -296,9 +304,11 @@ class ASSETMANAGER_OT_show_catalog(bpy.types.Operator):
             bot_split.scale_y = 1.2
 
             btn_col = bot_split.column(align=True)
+            btn_col.enabled = file_exists
+            
             op = btn_col.operator(
                 "assetmanager.load_from_db_deferred",
-                text="Load to Scene"
+                text="Load to Scene" if file_exists else "File Missing"
             )
             op.asset_id = asset['id']
 

@@ -213,36 +213,40 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
 
         # --- MODE ENFORCEMENT ---
         # Switch to Object Mode to ensure mesh data can be read/exported correctly
-        if context.active_object and context.active_object.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
+        # This is safe because context is checked in poll()
+        try:
+            if context.mode != 'OBJECT':
+                bpy.ops.object.mode_set(mode='OBJECT')
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to switch to Object Mode: {e}")
+            return {'CANCELLED'}
 
         # --- DISK SPACE VALIDATION ---
-        free_mb = get_free_space_mb()
-        if free_mb < 50.0:
-            self.report({'ERROR'}, f"LOW DISK SPACE ({free_mb:.1f} MB)! Please free up space (min 50MB) before registering.")
-            return {'CANCELLED'}
+        try:
+            free_mb = get_free_space_mb()
+            if free_mb < 50.0:
+                self.report({'ERROR'}, f"LOW DISK SPACE ({free_mb:.1f} MB)! Please free up space (min 50MB) before registering.")
+                return {'CANCELLED'}
+        except Exception:
+            pass # Continue if space check fails (fallback)
 
         try:
             # --- PENENTUAN UUID & MODE ---
             if self.has_existing_uuid and self.registration_mode == 'UPDATE':
                 # Skenario 1: Pakai UUID lama → timpa data yang sudah ada
-                asset_uuid = str(obj["asset_uuid"])
+                asset_uuid = str(obj.get("asset_uuid", uuid.uuid4()))
                 db_mode = 'UPDATE'
             elif self.has_existing_uuid and self.registration_mode == 'NEW':
                 # Skenario 2: Objek sudah punya UUID di DB, tapi user minta buat aset BARU (Varian).
                 asset_uuid = str(uuid.uuid4())
                 db_mode = 'NEW'
-                obj["asset_uuid_variant"] = asset_uuid
             else:
                 # Aset belum terdaftar di DB lokal (atau benar-benar baru)
                 original_uuid = obj.get("asset_uuid")
                 if original_uuid:
-                    # Objek punya UUID tapi tidak ada di DB Ubuntu ini.
-                    # Kita gunakan UUID yang sudah ada agar sinkron, tapi mode tetap NEW.
                     asset_uuid = str(original_uuid)
                     db_mode = 'NEW'
                 else:
-                    # Benar-benar baru
                     asset_uuid = str(uuid.uuid4())
                     obj["asset_uuid"] = asset_uuid
                     db_mode = 'NEW'
@@ -253,18 +257,13 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             file_path = self._export_asset(obj, asset_uuid)
             
             if not file_path:
-                raise RuntimeError("Export failed - file not created")
-            
-            # Validate export
-            is_valid, error = validate_export_path(file_path)
-            if not is_valid:
-                raise RuntimeError(f"Export validation failed: {error}")
+                raise RuntimeError("Export failed - could not create file. Check permissions.")
             
             # Step 2: Calculate geometry statistics
             stats = self._calculate_geometry_stats(obj)
             file_size = os.path.getsize(file_path)
             
-            # Step 3: Generate thumbnail (ALWAYS generate for preview)
+            # Step 3: Generate thumbnail
             self.report({'INFO'}, "Rendering thumbnail...")
             thumbnail_path = self._generate_thumbnail(obj, asset_uuid)
             
@@ -287,22 +286,21 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             # Step 5: Update UI & Load Preview
             asset_data = db_get_by_uuid(asset_uuid)
             if asset_data:
-                # Load preview immediately after registration (force reload if update)
+                # Load preview immediately
                 from ..core.preview import load_preview_for_single_asset
                 load_preview_for_single_asset(
                     asset_data, 
                     force_reload=(db_mode == 'UPDATE')
                 )
                 
-                # Add to scene
+                # Add to scene property
                 add_single_asset_to_scene(context, asset_data['id'])
                 
-                # Refresh ALL areas to show new preview
+                # Refresh UI
                 for window in context.window_manager.windows:
                     for area in window.screen.areas:
                         area.tag_redraw()
             
-            # Record success
             action = "registered" if inserted else "updated"
             self.report({'INFO'}, f"Asset '{self.asset_name}' {action} successfully")
             
@@ -310,17 +308,13 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
 
         except Exception as e:
             error_msg = str(e)
-            # Detect Disk Full (ENOSPC)
             if "No space left on device" in error_msg or "ENOSPC" in error_msg:
-                self.report({'ERROR'}, "DISK FULL! Please free up space on your device to register assets.")
+                self.report({'ERROR'}, "DISK FULL! Registration aborted.")
             else:
-                self.report({'ERROR'}, f"Registration failed: {error_msg}")
+                self.report({'ERROR'}, f"Registration error: {error_msg}")
             
-            # Log error for debugging
             import traceback
-            print(f"[AssetManager] Registration error:")
             traceback.print_exc()
-            
             return {'CANCELLED'}
 
     # =====================================================
@@ -372,7 +366,7 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             thumbnail_path,
             size=(size, size),
             samples=32,
-            use_transparent=False
+            use_transparent=True
         )
         
         if success and os.path.exists(thumbnail_path):

@@ -89,15 +89,15 @@ class ASSETMANAGER_OT_go_to_page(bpy.types.Operator):
     )
     
     def invoke(self, context, event):
-        scene = context.scene
-        total_pages = getattr(scene, "asset_total_pages", 1)
+        wm = context.window_manager
+        total_pages = getattr(wm, "asset_total_pages", 1)
         self.page_number = min(self.page_number, total_pages)
         return context.window_manager.invoke_props_dialog(self)
     
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
-        total_pages = getattr(scene, "asset_total_pages", 1)
+        wm = context.window_manager
+        total_pages = getattr(wm, "asset_total_pages", 1)
         
         layout.label(text=f"Total Pages: {total_pages}")
         layout.prop(self, "page_number")
@@ -131,30 +131,30 @@ class ASSETMANAGER_OT_apply_filters(bpy.types.Operator):
     smart_action: bpy.props.StringProperty(default="")
     
     def execute(self, context):
-        scene = context.scene
+        wm = context.window_manager
         
         # Apply presets
         if self.category:
-            scene.asset_category = self.category
+            wm.asset_category = self.category
             
         if self.min_size != -1:
-            scene.filter_min_size = self.min_size
+            wm.filter_min_size = self.min_size
             
         if self.max_size != -1:
-            scene.filter_max_size = self.max_size
+            wm.filter_max_size = self.max_size
             
         # Popularity toggle logic
         if self.smart_action == 'MOST_USED':
-            if scene.asset_sort_by == 'popularity':
-                scene.asset_sort_by = 'created_at' # Back to default
+            if wm.asset_sort_by == 'popularity':
+                wm.asset_sort_by = 'created_at' # Back to default
             else:
-                scene.asset_sort_by = 'popularity'
-                scene.asset_sort_order = 'DESC'
+                wm.asset_sort_by = 'popularity'
+                wm.asset_sort_order = 'DESC'
             
         # Trigger reload
         on_filter_changed(context)
         
-        total = getattr(scene, "asset_total_count", 0)
+        total = getattr(wm, "asset_total_count", 0)
         self.report({'INFO'}, f"Filter Applied: Found {total} assets")
         return {'FINISHED'}
 
@@ -166,25 +166,25 @@ class ASSETMANAGER_OT_clear_filters(bpy.types.Operator):
     bl_description = "Reset all filters and show all assets"
     
     def execute(self, context):
-        scene = context.scene
+        wm = context.window_manager
         
         # Reset all filter properties
-        scene.asset_search = ""
-        scene.asset_category = 'ALL'
-        scene.filter_min_size = 0
-        scene.filter_max_size = 0
-        scene.filter_min_poly = 0
-        scene.filter_max_poly = 0
-        scene.filter_min_vert = 0
-        scene.filter_max_vert = 0
-        scene.filter_days_old = '0'
-        scene.asset_sort_by = 'created_at'
-        scene.asset_sort_order = 'DESC'
+        wm.asset_search = ""
+        wm.asset_category = 'ALL'
+        wm.filter_min_size = 0
+        wm.filter_max_size = 0
+        wm.filter_min_poly = 0
+        wm.filter_max_poly = 0
+        wm.filter_min_vert = 0
+        wm.filter_max_vert = 0
+        wm.filter_days_old = '0'
+        wm.asset_sort_by = 'created_at'
+        wm.asset_sort_order = 'DESC'
         
         # Reload from first page
         on_filter_changed(context)
         
-        total = getattr(scene, "asset_total_count", 0)
+        total = getattr(wm, "asset_total_count", 0)
         self.report({'INFO'}, f"Showing all {total} assets")
         
         return {'FINISHED'}
@@ -226,8 +226,8 @@ class ASSETMANAGER_OT_change_page_size(bpy.types.Operator):
     )
     
     def invoke(self, context, event):
-        scene = context.scene
-        current_size = getattr(scene, "asset_page_size", 10)
+        wm = context.window_manager
+        current_size = getattr(wm, "asset_page_size", 10)
         self.page_size = str(current_size)
         return context.window_manager.invoke_props_dialog(self)
     
@@ -237,11 +237,11 @@ class ASSETMANAGER_OT_change_page_size(bpy.types.Operator):
         layout.label(text="Larger sizes may slow down UI", icon='INFO')
     
     def execute(self, context):
-        scene = context.scene
+        wm = context.window_manager
         new_size = int(self.page_size)
         
         # Update page size
-        scene.asset_page_size = new_size
+        wm.asset_page_size = new_size
         
         # Reload from first page with new size
         load_assets_to_scene(context, page=0, page_size=new_size, force_reload=True)
@@ -284,9 +284,9 @@ class ASSETMANAGER_OT_change_sort(bpy.types.Operator):
     )
     
     def invoke(self, context, event):
-        scene = context.scene
-        self.sort_by = getattr(scene, "asset_sort_by", 'created_at')
-        self.sort_order = getattr(scene, "asset_sort_order", 'DESC')
+        wm = context.window_manager
+        self.sort_by = getattr(wm, "asset_sort_by", 'created_at')
+        self.sort_order = getattr(wm, "asset_sort_order", 'DESC')
         return context.window_manager.invoke_props_dialog(self)
     
     def draw(self, context):
@@ -295,15 +295,15 @@ class ASSETMANAGER_OT_change_sort(bpy.types.Operator):
         layout.prop(self, "sort_order", expand=True)
     
     def execute(self, context):
-        scene = context.scene
+        wm = context.window_manager
         
         # Update scene properties
-        scene.asset_sort_by = self.sort_by
-        scene.asset_sort_order = self.sort_order
+        wm.asset_sort_by = self.sort_by
+        wm.asset_sort_order = self.sort_order
         
         # Reload current page with new sorting
-        current_page = getattr(scene, "asset_current_page", 0)
-        page_size = getattr(scene, "asset_page_size", 10)
+        current_page = getattr(wm, "asset_current_page", 0)
+        page_size = getattr(wm, "asset_page_size", 10)
         
         load_assets_to_scene(context, page=current_page, page_size=page_size, force_reload=True)
         

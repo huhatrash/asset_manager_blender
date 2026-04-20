@@ -65,13 +65,29 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
                 self.report({'WARNING'}, "No objects imported")
                 return {'CANCELLED'}
                 
+            # Update view layer to ensure objects are fully integrated before selection
+            context.view_layer.update()
+            
             # Select imported objects
             bpy.ops.object.select_all(action='DESELECT')
             for obj in self._imported_objects:
-                obj.select_set(True)
+                try:
+                    # Only select if object is actually in the current view layer
+                    if obj.name in context.view_layer.objects:
+                        obj.select_set(True)
+                except (RuntimeError, ReferenceError):
+                    # Silently skip if object cannot be selected (e.g. not in view layer)
+                    pass
                 
             if self._imported_objects:
-                context.view_layer.objects.active = self._imported_objects[0]
+                # Find the first valid object to set as active
+                for obj in self._imported_objects:
+                    try:
+                        if obj.name in context.view_layer.objects:
+                            context.view_layer.objects.active = obj
+                            break
+                    except (RuntimeError, ReferenceError):
+                        pass
                 
             # Identify root objects (objects without a parent in the imported set)
             # This prevents moving a child and its parent and getting double translation.
@@ -103,8 +119,9 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
             bpy.ops.object.select_all(action='DESELECT')
             for obj in self._imported_objects:
                 try:
-                    obj.select_set(True)
-                except ReferenceError:
+                    if obj.name in context.view_layer.objects:
+                        obj.select_set(True)
+                except (RuntimeError, ReferenceError):
                     pass
             bpy.ops.object.delete()
             
@@ -124,11 +141,19 @@ class ASSETMANAGER_OT_load_from_db(bpy.types.Operator):
             if self._imported_objects:
                 for obj in self._imported_objects:
                     try:
-                        obj.select_set(True)
-                    except ReferenceError:
+                        if obj.name in context.view_layer.objects:
+                            obj.select_set(True)
+                    except (RuntimeError, ReferenceError):
                         pass
-                if self._imported_objects[0].name in bpy.data.objects:
-                    context.view_layer.objects.active = self._imported_objects[0]
+                
+                try:
+                    # Set active object
+                    for obj in self._imported_objects:
+                        if obj.name in context.view_layer.objects:
+                            context.view_layer.objects.active = obj
+                            break
+                except:
+                    pass
 
             # Record usage
             try:
@@ -211,15 +236,23 @@ class ASSETMANAGER_OT_load_from_db_deferred(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     asset_id: bpy.props.IntProperty()
+    
+    # Global lock to prevent double-clicks triggering multiple imports
+    _is_scheduling = False
 
     def execute(self, context):
+        if ASSETMANAGER_OT_load_from_db_deferred._is_scheduling:
+            return {'FINISHED'}
+            
+        ASSETMANAGER_OT_load_from_db_deferred._is_scheduling = True
         a_id = self.asset_id
         
         def start_placement():
+            ASSETMANAGER_OT_load_from_db_deferred._is_scheduling = False
             # Invoke the real modal operator after the initial popup context is destroyed
             bpy.ops.assetmanager.load_from_db('INVOKE_DEFAULT', asset_id=a_id)
             return None
             
         # Give the popup a tiny moment to truly close
-        bpy.app.timers.register(start_placement, first_interval=0.01)
+        bpy.app.timers.register(start_placement, first_interval=0.1)
         return {'FINISHED'}

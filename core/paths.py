@@ -7,6 +7,23 @@ Version: 2.0
 """
 
 import os
+import time
+
+# Cache for os.path.exists to prevent UI stuttering
+_EXISTS_CACHE = {}
+_EXISTS_EXPIRY = 2.0 # seconds
+
+def safe_file_exists(path):
+    """Cached version of os.path.exists for performance-critical UI loops."""
+    if not path: return False
+    now = time.time()
+    if path in _EXISTS_CACHE:
+        val, expiry = _EXISTS_CACHE[path]
+        if now < expiry:
+            return val
+    exists = os.path.exists(path)
+    _EXISTS_CACHE[path] = (exists, now + _EXISTS_EXPIRY)
+    return exists
 import bpy
 
 
@@ -235,12 +252,14 @@ def get_safe_filename(name, extension=""):
     if not safe_name:
         safe_name = "asset"
         
-    # 7. Add extension
+    # 7. Add extension (prevent double extensions)
     if extension:
         if not extension.startswith('.'):
             extension = '.' + extension
-        # If extension itself is illegal, this might still be weird, but extension usually comes from code
-        safe_name += extension
+        
+        # Only append if safe_name does not already end with this extension
+        if not safe_name.lower().endswith(extension.lower()):
+            safe_name += extension
     
     return safe_name
 
@@ -345,14 +364,51 @@ def get_relative_path(filepath, base_dir=None):
 def normalize_path(path):
     """
     Normalize path (resolve .., ., convert slashes).
+    """
+    if not path:
+        return ""
+    # Ensure cross-platform slashes
+    return os.path.normpath(os.path.abspath(path))
+
+
+def resolve_portable_path(recorded_path, category='EXPORTS'):
+    """
+    Resolve recorded absolute path to current OS context.
+    If the absolute path doesn't exist (e.g. from a different OS),
+    looks for the filename in the current local data folders.
     
     Args:
-        path (str): Path to normalize
-    
+        recorded_path (str): Path stored in database
+        category (str): 'EXPORTS' or 'THUMBNAILS'
+        
     Returns:
-        str: Normalized absolute path
+        str: Valid local path or original if nothing found
     """
-    return os.path.normpath(os.path.abspath(path))
+    if not recorded_path:
+        return ""
+        
+    # 1. If it already exists, return it (same machine or same mount point)
+    if os.path.exists(recorded_path):
+        return recorded_path
+        
+    # 2. Extract filename
+    # We use both slash types to split to handle cross-OS strings
+    filename = recorded_path.replace('\\', '/').split('/')[-1]
+    
+    # 3. Attempt local resolution
+    if category == 'EXPORTS':
+        local_dir = get_exports_dir()
+    elif category == 'THUMBNAILS':
+        local_dir = get_thumbnails_dir()
+    else:
+        local_dir = get_data_dir()
+        
+    local_path = os.path.join(local_dir, filename)
+    
+    if os.path.exists(local_path):
+        return local_path
+        
+    return recorded_path
 
 
 # =====================================================

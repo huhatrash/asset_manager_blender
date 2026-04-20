@@ -52,6 +52,7 @@ from .operators import (
     pagination_operators,
     toggle_favorite,
     batch_operations,
+    maintenance,
 )
 
 # UI
@@ -62,6 +63,7 @@ from .ui.panel import (
     ASSETMANAGER_PT_filters,
     ASSETMANAGER_PT_management,
     ASSETMANAGER_PT_recently_used,
+    ASSETMANAGER_PT_maintenance,
 )
 from .ui.ui_list import ASSETMANAGER_UL_list
 
@@ -118,6 +120,11 @@ classes = (
     pagination_operators.ASSETMANAGER_OT_change_sort,
     pagination_operators.ASSETMANAGER_OT_show_statistics,
     
+    # Maintenance
+    maintenance.ASSETMANAGER_OT_trim_history,
+    maintenance.ASSETMANAGER_OT_cleanup_orphans,
+    maintenance.ASSETMANAGER_OT_optimize_db,
+    
     # Panels
     ASSETMANAGER_PT_panel,
     ASSETMANAGER_PT_management,
@@ -125,6 +132,7 @@ classes = (
     ASSETMANAGER_PT_details,
     ASSETMANAGER_PT_filters,
     ASSETMANAGER_PT_recently_used,
+    ASSETMANAGER_PT_maintenance,
 )
 
 
@@ -139,23 +147,9 @@ def assetmanager_on_load(dummy):
     Loads assets into UI with pagination.
     """
     try:
-        # Safe context access - multiple fallback methods
-        scene = None
+        wm = getattr(bpy.context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
         
-        # Method 1: Try direct context.scene
-        if hasattr(bpy.context, 'scene') and bpy.context.scene:
-            scene = bpy.context.scene
-        
-        # Method 2: Try context.window.scene
-        elif hasattr(bpy.context, 'window') and bpy.context.window and hasattr(bpy.context.window, 'scene'):
-            scene = bpy.context.window.scene
-        
-        # Method 3: Use first scene from bpy.data
-        elif bpy.data.scenes:
-            scene = bpy.data.scenes[0]
-        
-        if not scene:
-            print("[AssetManager] No scene available, skipping asset load")
+        if not wm:
             return
         
         # Create dummy context
@@ -163,20 +157,17 @@ def assetmanager_on_load(dummy):
             pass
         
         ctx = DummyContext()
-        ctx.scene = scene
+        ctx.window_manager = wm
+        ctx.scene = getattr(bpy.context, "scene", bpy.data.scenes[0] if bpy.data.scenes else None)
         
-        # Get page size from preferences or use default
-        page_size = getattr(scene, "asset_page_size", 10)
+        # Get page size from global WM props
+        page_size = getattr(wm, "asset_page_size", 10)
         
         # Load first page of assets
         load_assets_to_scene(ctx, page=0, page_size=page_size, force_reload=True)
         
-        print(f"[AssetManager] Loaded assets (page 1, {page_size} items per page)")
-        
     except Exception as e:
-        print(f"[AssetManager] Load error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"[AssetManager] Startup load error: {e}")
 
 def load_assets_delayed():
     """Delayed asset loading to ensure context is ready."""

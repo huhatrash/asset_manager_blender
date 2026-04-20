@@ -52,7 +52,7 @@ def clear_previews():
 def get_asset_preview_key(asset):
     """
     Generate a centralized, versioned icon key for an asset.
-    Handles both Scene PropertyGroups and Database Dictionaries.
+    Version is based on 'updated_at' timestamp + 'preview_version' integer.
     """
     if not asset:
         return ""
@@ -60,25 +60,24 @@ def get_asset_preview_key(asset):
     # 1. Dictionary (from Database)
     if isinstance(asset, dict):
         uuid = asset.get('uuid', '')
-        # Use sanitized updated_at as the version for DB items
         updated_at = asset.get('updated_at', '')
-        if updated_at:
-            version = updated_at.replace(' ', '_').replace(':', '')
-        else:
-            # Fallback to a custom property if it exists
-            version = asset.get('preview_version', 0)
+        # Add integer version if it exists in dict
+        v_int = asset.get('preview_version', 0)
     
     # 2. PropertyGroup (from Scene)
     else:
         uuid = getattr(asset, 'uuid', '')
-        version = getattr(asset, 'preview_version', 0)
+        updated_at = getattr(asset, 'updated_at', '')
+        v_int = getattr(asset, 'preview_version', 0)
     
     if not uuid:
         return ""
         
-    # Use double underscores as a "System Separator" to avoid clashing with
-    # single underscores that might exist in UUIDs or version strings.
-    return f"asset__{uuid}__{version}"
+    # Sanitize updated_at for use in key
+    v_str = updated_at.replace(' ', '_').replace(':', '').replace('-', '') if updated_at else "0"
+    
+    # Centralized key format: asset__UUID__TIMESTAMP__VERSION
+    return f"asset__{uuid}__{v_str}__{v_int}"
 
 
 # =====================================================
@@ -123,11 +122,26 @@ def load_preview_for_single_asset(asset, force_reload=False):
             
     # Check if already loaded
     if key in pcoll:
+        # Record access in cache
+        cache = get_preview_cache()
+        if "__" in key:
+            parts = key.split("__")
+            if len(parts) >= 2:
+                cache.record_access(parts[1]) # parts[1] is UUID
         return pcoll[key]
     
     # Load new preview
     try:
         preview = pcoll.load(key, thumbnail_path, 'IMAGE')
+        
+        # Record access in cache if successful
+        if preview:
+            cache = get_preview_cache()
+            if "__" in key:
+                parts = key.split("__")
+                if len(parts) >= 2:
+                    cache.record_access(parts[1])
+                    
         return preview
     except Exception as e:
         print(f"[AssetManager] Failed to load preview {key}: {e}")
@@ -381,7 +395,7 @@ class PreviewCache:
         self.max_size = max_size
         self.access_order = []  # Track access order
     
-    def access(self, asset_uuid):
+    def record_access(self, asset_uuid):
         """
         Record access to a preview (move to end = most recent).
         
@@ -420,7 +434,7 @@ class PreviewCache:
         
         if preview:
             # Record access
-            self.access(uuid)
+            self.record_access(uuid)
         
         return preview
     
@@ -438,7 +452,7 @@ def get_preview_cache():
     global _preview_cache
     
     if _preview_cache is None:
-        _preview_cache = PreviewCache(max_size=100)
+        _preview_cache = PreviewCache(max_size=200) # Increased to 200 for commercial use
     
     return _preview_cache
 

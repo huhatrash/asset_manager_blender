@@ -1,5 +1,5 @@
 import bpy
-from ..core.database import db_get_paginated
+from ..core.database import db_get_paginated, db_get_library_stats
 from ..core.preview import load_preview_for_single_asset
 from ..core.preview import get_preview_collection
 
@@ -34,8 +34,15 @@ SORT_LABELS = {
     'category': 'Category',
     'file_size': 'Size',
     'poly_count': 'Polys',
+    'vertices': 'Vertices',
 }
 
+
+# =====================================================
+# PERFORMANCE: DISK CHECK CACHE
+# =====================================================
+
+from ..core.paths import safe_file_exists
 
 # =====================================================
 # MAIN PANEL  (parent for all sub-panels)
@@ -54,10 +61,10 @@ class ASSETMANAGER_PT_panel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
+        wm = context.window_manager
 
-        total = getattr(scene, "asset_total_count", 0)
-        loaded = len(scene.asset_items)
+        total = getattr(wm, "asset_total_count", 0)
+        loaded = len(wm.asset_items)
 
         # Compact status line
         row = layout.row(align=True)
@@ -83,17 +90,17 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
+        wm = context.window_manager
 
         # ---- Search + Category + Favorites + Sort (compact single row) ----
         row = layout.row(align=True)
-        row.prop(scene, "asset_search", text="", icon='VIEWZOOM',
+        row.prop(wm, "asset_search", text="", icon='VIEWZOOM',
                  placeholder="Search...")
-        row.prop(scene, "asset_category", text="")
+        row.prop(wm, "asset_category", text="")
         
         # Favorites toggle
-        fav_icon = 'SOLO_ON' if scene.filter_favorites else 'SOLO_OFF'
-        row.prop(scene, "filter_favorites", text="", icon=fav_icon)
+        fav_icon = 'SOLO_ON' if wm.filter_favorites else 'SOLO_OFF'
+        row.prop(wm, "filter_favorites", text="", icon=fav_icon)
 
         # Sort toggle (icon only)
         row.operator("assetmanager.change_sort", text="", icon='SORT_DESC')
@@ -105,20 +112,24 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
         col_list = split.column()
         col_list.template_list(
             "ASSETMANAGER_UL_list", "",
-            scene, "asset_items",
-            scene, "asset_index",
+            wm, "asset_items",
+            wm, "asset_index",
             rows=8,
         )
 
         # RIGHT — preview
         col_prev = split.column()
-        if scene.show_thumbnail:
-            idx = scene.asset_index
-            if 0 <= idx < len(scene.asset_items):
-                item = scene.asset_items[idx]
+        if wm.show_thumbnail:
+            idx = wm.asset_index
+            if 0 <= idx < len(wm.asset_items):
+                item = wm.asset_items[idx]
                 from ..core.preview import get_asset_preview_key
                 preview_key = get_asset_preview_key(item)
                 pcoll = get_preview_collection()
+
+                if preview_key not in pcoll:
+                    # ✅ ON-DEMAND LOAD: Only for the main preview panel
+                    load_preview_for_single_asset(item)
 
                 if preview_key in pcoll:
                     col_prev.template_icon(
@@ -138,11 +149,11 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
             box.scale_y = 4.0
             box.label(text="Preview off", icon='HIDE_ON')
 
-        col_prev.prop(scene, "show_thumbnail", text="Preview")
+        col_prev.prop(wm, "show_thumbnail", text="Preview")
 
         # ---- Pagination (optimized width) ----
-        total_pages = getattr(scene, "asset_total_pages", 0)
-        current_page = getattr(scene, "asset_current_page", 0)
+        total_pages = getattr(wm, "asset_total_pages", 0)
+        current_page = getattr(wm, "asset_current_page", 0)
 
         # Split: pagination vs page size (align=False to keep them separate)
         split = layout.split(factor=0.80, align=False)
@@ -163,21 +174,26 @@ class ASSETMANAGER_PT_browse(bpy.types.Panel):
 
         # Page Size (separated by the split's natural gap)
         row_size = split.row(align=True)
-        page_size = getattr(scene, "asset_page_size", 10)
+        page_size = getattr(wm, "asset_page_size", 10)
         row_size.operator("assetmanager.change_page_size",
                           text=str(page_size), icon='PREFERENCES')
 
         # ---- Primary actions for selected asset ----
-        idx = scene.asset_index
-        if 0 <= idx < len(scene.asset_items):
-            item = scene.asset_items[idx]
+        idx = wm.asset_index
+        if 0 <= idx < len(wm.asset_items):
+            item = wm.asset_items[idx]
 
             row = layout.row(align=True)
             row.scale_y = 1.4
 
+            # Check if file exists on disk (using cached check for speed)
+            file_exists = safe_file_exists(item.file_path)
+
             op = row.operator("assetmanager.load_from_db",
-                              text="Load", icon='IMPORT')
+                               text="Load" if file_exists else "File Missing", 
+                               icon='IMPORT' if file_exists else 'ERROR')
             op.asset_id = item.id
+            row.enabled = file_exists
 
             op = row.operator("assetmanager.edit_metadata",
                               text="Edit", icon='FILE_TEXT')
@@ -210,14 +226,25 @@ class ASSETMANAGER_PT_details(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
+        wm = context.window_manager
 
-        idx = scene.asset_index
-        if not (0 <= idx < len(scene.asset_items)):
+        idx = wm.asset_index
+        if not (0 <= idx < len(wm.asset_items)):
             layout.label(text="No asset selected", icon='INFO')
             return
 
-        item = scene.asset_items[idx]
+        item = wm.asset_items[idx]
+
+        # ── 🚨 ROBUST FEEDBACK: Check if file exists ──────────────────────────
+        file_exists = safe_file_exists(item.file_path)
+        
+        if not file_exists:
+            box = layout.box()
+            row = box.row()
+            row.alert = True
+            row.label(text="FILE MISSING FROM DISK", icon='ERROR')
+            box.label(text="This record should be cleaned up or the file restored.", icon='INFO')
+            layout.separator()
 
         layout.use_property_split = True
         layout.use_property_decorate = False
@@ -300,30 +327,30 @@ class ASSETMANAGER_PT_filters(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
+        wm = context.window_manager
 
         layout.use_property_split = True
         layout.use_property_decorate = False
 
         # Size range
         col = layout.column(align=True)
-        col.prop(scene, "filter_min_size", text="Min Size (KB)")
-        col.prop(scene, "filter_max_size", text="Max Size (KB)")
+        col.prop(wm, "filter_min_size", text="Min Size (KB)")
+        col.prop(wm, "filter_max_size", text="Max Size (KB)")
 
         col.separator(factor=0.5)
 
         # Polygon & Vertex range
         col = layout.column(align=True)
-        col.prop(scene, "filter_min_poly", text="Min Polys")
-        col.prop(scene, "filter_max_poly", text="Max Polys")
-        col.prop(scene, "filter_min_vert", text="Min Verts")
-        col.prop(scene, "filter_max_vert", text="Max Verts")
+        col.prop(wm, "filter_min_poly", text="Min Polys")
+        col.prop(wm, "filter_max_poly", text="Max Polys")
+        col.prop(wm, "filter_min_vert", text="Min Verts")
+        col.prop(wm, "filter_max_vert", text="Max Verts")
 
         layout.separator(factor=0.5)
         
         # Date Logic
         col = layout.column(align=True)
-        col.prop(scene, "filter_days_old", text="Added Last")
+        col.prop(wm, "filter_days_old", text="Added Last")
 
         layout.separator(factor=0.5)
 
@@ -492,6 +519,80 @@ class ASSETMANAGER_PT_management(bpy.types.Panel):
 
 
 # =====================================================
+# 7) MAINTENANCE  — collapsed by default
+# =====================================================
+
+class ASSETMANAGER_PT_maintenance(bpy.types.Panel):
+    """Diagnostic and cleanup tools"""
+    bl_label = "Maintenance"
+    bl_idname = "ASSETMANAGER_PT_maintenance"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Asset Manager'
+    bl_parent_id = "ASSETMANAGER_PT_panel"
+    bl_options = {'DEFAULT_CLOSED'}
+    bl_order = 10
+
+    def draw(self, context):
+        layout = self.layout
+        
+        box = layout.box()
+        box.label(text="System Maintenance", icon='NONE')
+        
+        # Row 1: Optimize
+        row = box.row(align=True)
+        row.label(text="Database Health", icon='NONE')
+        row.operator("assetmanager.optimize_db", text="Optimize", icon='FILE_REFRESH')
+        
+        # Row 2: Orphans
+        row = box.row(align=True)
+        row.label(text="Integrity Cleanup", icon='NONE')
+        row.operator("assetmanager.cleanup_orphans", text="Cleanup", icon='TRASH')
+        
+        # Row 3: History
+        row = box.row(align=True)
+        row.label(text="Usage History", icon='NONE')
+        row.operator("assetmanager.trim_history", text="Trim", icon='REMOVE')
+
+        box.separator(factor=0.5)
+        
+        # --- NEW: Library Diagnostics ---
+        diag_box = box.box()
+        diag_box.label(text="Library Diagnostics", icon='INFO')
+        
+        stats = db_get_library_stats()
+        if 'error' not in stats:
+            col = diag_box.column(align=True)
+            
+            # Row: Total Assets
+            row = col.row()
+            row.label(text="Total Assets:")
+            row.label(text=str(stats.get('total_assets', 0)))
+            
+            # Row: Library Size
+            row = col.row()
+            row.label(text="Library Size:")
+            row.label(text=_format_size(stats.get('total_bytes', 0)))
+            
+            # Row: Categories Breakdown (compact)
+            if stats.get('categories'):
+                diag_box.separator(factor=0.3)
+                cats = stats['categories']
+                cat_text = ", ".join([f"{c.capitalize()}: {v}" for c, v in cats.items()])
+                diag_box.label(text=cat_text, icon='NONE')
+        else:
+            diag_box.label(text="Stats unavailable", icon='ERROR')
+
+        box.separator(factor=0.5)
+        
+        # Version Footer
+        row = layout.row()
+        row.alignment = 'RIGHT'
+        row.enabled = False
+        row.label(text="Asset Manager v3.1.2 Production", icon='NONE')
+
+
+# =====================================================
 # REGISTER
 # =====================================================
 
@@ -502,6 +603,7 @@ classes = (
     ASSETMANAGER_PT_filters,
     ASSETMANAGER_PT_details,
     ASSETMANAGER_PT_recently_used,
+    ASSETMANAGER_PT_maintenance,
 )
 
 

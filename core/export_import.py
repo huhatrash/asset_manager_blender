@@ -24,10 +24,7 @@ def export_selected_to_fbx(obj, output_dir, filename=None):
         return None
     
     # Generate filename
-    if not filename:
-        filename = get_safe_filename(obj.name, '.fbx')
-    elif not filename.endswith('.fbx'):
-        filename += '.fbx'
+    filename = get_safe_filename(filename or obj.name, '.fbx')
     
     # Get full output path
     output_path = get_unique_filepath(output_dir, filename)
@@ -135,10 +132,7 @@ def export_selected_to_obj(obj, output_dir, filename=None):
         return None
     
     # Generate filename
-    if not filename:
-        filename = get_safe_filename(obj.name, '.obj')
-    elif not filename.endswith('.obj'):
-        filename += '.obj'
+    filename = get_safe_filename(filename or obj.name, '.obj')
     
     # Get full output path
     output_path = get_unique_filepath(output_dir, filename)
@@ -211,10 +205,7 @@ def export_selected_to_gltf(obj, output_dir, filename=None):
         return None
     
     # Generate filename
-    if not filename:
-        filename = get_safe_filename(obj.name, '.glb')
-    elif not filename.endswith('.glb'):
-        filename += '.glb'
+    filename = get_safe_filename(filename or obj.name, '.glb')
     
     # Get full output path
     output_path = get_unique_filepath(output_dir, filename)
@@ -229,14 +220,39 @@ def export_selected_to_gltf(obj, output_dir, filename=None):
         obj.select_set(True)
         bpy.context.view_layer.objects.active = obj
         
-        # glTF/GLB Export
-        bpy.ops.export_scene.gltf(
-            filepath=output_path,
-            use_selection=True,
-            export_format='GLB',
-            export_apply=True,
-            export_image_format='AUTO'
-        )
+        # glTF/GLB Export - Multi-stage attempt for maximum compatibility
+        success = False
+        
+        # 1. Try modern wm.gltf_export (Blender 4.2+)
+        if hasattr(bpy.ops.wm, "gltf_export"):
+            try:
+                bpy.ops.wm.gltf_export(
+                    filepath=output_path,
+                    export_selected=True,
+                    export_format='GLB',
+                    export_apply=True,
+                    export_image_format='AUTO'
+                )
+                success = True
+            except Exception as e:
+                print(f"[AssetManager] Modern GLB export failed: {e}")
+        
+        # 2. Try legacy export_scene.gltf if modern failed or unavailable
+        if not success and hasattr(bpy.ops.export_scene, "gltf"):
+            try:
+                bpy.ops.export_scene.gltf(
+                    filepath=output_path,
+                    use_selection=True,
+                    export_format='GLB',
+                    export_apply=True,
+                    export_image_format='AUTO'
+                )
+                success = True
+            except Exception as e:
+                print(f"[AssetManager] Legacy GLB export failed: {e}")
+        
+        if not success:
+            raise RuntimeError("glTF/GLB exporter not found. Please ensure 'glTF 2.0' addon is enabled.")
         
         # Restore selection
         bpy.ops.object.select_all(action='DESELECT')
@@ -346,10 +362,7 @@ def export_selected_to_blend(obj, output_dir, filename=None):
         return None
     
     # Generate filename
-    if not filename:
-        filename = get_safe_filename(obj.name, '.blend')
-    elif not filename.endswith('.blend'):
-        filename += '.blend'
+    filename = get_safe_filename(filename or obj.name, '.blend')
     
     # Get full output path
     output_path = get_unique_filepath(output_dir, filename)
@@ -592,11 +605,11 @@ def import_obj_file(filepath):
     
     try:
         if bpy.app.version >= (4, 0, 0):
-            # Modern C++ OBJ Importer
+            # Modern C++ OBJ Importer (Blender 4.0+)
+            # Using essential parameters for maximum compatibility
             bpy.ops.wm.obj_import(
                 filepath=filepath,
-                import_vertex_groups=True,
-                import_order='DEFAULT'
+                import_vertex_groups=True
             )
         else:
             # Legacy Python OBJ Importer
@@ -624,7 +637,27 @@ def import_gltf_file(filepath):
     if not os.path.exists(filepath): return []
     objects_before = set(bpy.data.objects)
     try:
-        bpy.ops.import_scene.gltf(filepath=filepath)
+        success = False
+        # 1. Try modern wm.gltf_import (Blender 4.2+)
+        if hasattr(bpy.ops.wm, "gltf_import"):
+            try:
+                bpy.ops.wm.gltf_import(filepath=filepath)
+                success = True
+            except:
+                pass
+        
+        # 2. Try legacy import_scene.gltf
+        if not success and hasattr(bpy.ops.import_scene, "gltf"):
+            try:
+                bpy.ops.import_scene.gltf(filepath=filepath)
+                success = True
+            except:
+                pass
+                
+        if not success:
+            print("[AssetManager] glTF/GLB importer not found. Please enable 'glTF 2.0' addon.")
+            return []
+            
         objects_after = set(bpy.data.objects)
         return list(objects_after - objects_before)
     except Exception as e:
@@ -842,6 +875,7 @@ def get_object_file_size_estimate(obj):
 def cleanup_imported_objects(objects):
     """
     Clean up imported objects (remove empties, fix names, etc.).
+    Also deletes filtered-out objects from the scene to keep it clean.
     
     Args:
         objects (list): List of imported objects
@@ -850,17 +884,34 @@ def cleanup_imported_objects(objects):
         list: Cleaned objects
     """
     cleaned = []
+    to_delete = []
     
     for obj in objects:
-        # Skip empties
-        if obj.type == 'EMPTY':
+        if not obj:
+            continue
+            
+        # Filter: Skip empties and non-renderable objects
+        if obj.type in {'EMPTY', 'LIGHT', 'CAMERA'}:
+            to_delete.append(obj)
             continue
         
-        # Fix names (remove .001 suffixes if needed)
-        if obj.name.endswith('.001'):
-            base_name = obj.name[:-4]
-            obj.name = base_name
+        # Safe name cleaning: remove Blender numeric suffixes like .001, .002
+        import re
+        obj.name = re.sub(r'\.\d{3}$', '', obj.name)
         
         cleaned.append(obj)
+    
+    # Actually delete the filtered-out objects and their data
+    if to_delete:
+        for obj in to_delete:
+            try:
+                data = obj.data
+                bpy.data.objects.remove(obj, do_unlink=True)
+                # Purge data if it has no more users
+                if data and hasattr(data, 'users') and data.users == 0:
+                    if obj.type == 'LIGHT' and data in bpy.data.lights[:]: bpy.data.lights.remove(data)
+                    elif obj.type == 'CAMERA' and data in bpy.data.cameras[:]: bpy.data.cameras.remove(data)
+            except:
+                pass
     
     return cleaned

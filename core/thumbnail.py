@@ -5,7 +5,7 @@ from mathutils import Vector
 
 
 def render_thumbnail_for_object(obj, output_path, size=(300, 300), 
-                                samples=64, use_transparent=True):
+                                samples=128, use_transparent=True):
     """
     Args:
         obj: Object untuk di-render
@@ -40,7 +40,7 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
     
     try:
         # ✅ TRANSPARENT BACKGROUND
-        scene.render.film_transparent = True
+        scene.render.film_transparent = use_transparent
         
         # ✅ WORLD — Buat world sementara yang terpisah agar world asli tidak berubah
         temp_world = bpy.data.worlds.new("_TempThumbWorld")
@@ -56,7 +56,7 @@ def render_thumbnail_for_object(obj, output_path, size=(300, 300),
         
         # ✅ RENDER ENGINE: Cycles + Denoiser untuk hasil realistis
         scene.render.engine = 'CYCLES'
-        scene.cycles.samples = 128
+        scene.cycles.samples = samples
         scene.cycles.use_denoising = True
         try:
             scene.cycles.denoiser = 'OPENIMAGEDENOISE'
@@ -357,6 +357,7 @@ def _store_scene_settings(scene):
             'diffuse_bounces': c.diffuse_bounces,
             'glossy_bounces': c.glossy_bounces,
             'transmission_bounces': c.transmission_bounces,
+            'use_transparent': True,
             'transparent_max_bounces': c.transparent_max_bounces,
         }
         try: settings['cycles']['denoiser'] = c.denoiser

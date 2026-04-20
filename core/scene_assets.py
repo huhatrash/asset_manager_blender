@@ -21,34 +21,34 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
     Returns:
         int: Number of assets loaded
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
-    if not hasattr(scene, "asset_items"):
+    if not hasattr(wm, "asset_items"):
         return 0
     
     # Check if we need to reload
-    current_page = getattr(scene, "asset_current_page", -1)
-    if not force_reload and current_page == page and len(scene.asset_items) > 0:
-        return len(scene.asset_items)  # Already loaded this page
+    current_page = getattr(wm, "asset_current_page", -1)
+    if not force_reload and current_page == page and len(wm.asset_items) > 0:
+        return len(wm.asset_items)  # Already loaded this page
     
     # Get filter parameters from scene
-    category = getattr(scene, "asset_category", 'ALL')
-    search = getattr(scene, "asset_search", "")
-    filter_favorites = getattr(scene, "filter_favorites", False)
-    sort_by = getattr(scene, "asset_sort_by", 'created_at')
-    sort_order = getattr(scene, "asset_sort_order", 'DESC')
+    category = getattr(wm, "asset_category", 'ALL')
+    search = getattr(wm, "asset_search", "")
+    filter_favorites = getattr(wm, "filter_favorites", False)
+    sort_by = getattr(wm, "asset_sort_by", 'created_at')
+    sort_order = getattr(wm, "asset_sort_order", 'DESC')
     
     # Get advanced filter parameters
-    min_size = getattr(scene, "filter_min_size", 0)
-    max_size = getattr(scene, "filter_max_size", 0)
-    min_poly = getattr(scene, "filter_min_poly", 0)
-    max_poly = getattr(scene, "filter_max_poly", 0)
-    min_vert = getattr(scene, "filter_min_vert", 0)
-    max_vert = getattr(scene, "filter_max_vert", 0)
-    days_old = int(getattr(scene, "filter_days_old", '0'))
+    min_size = getattr(wm, "filter_min_size", 0)
+    max_size = getattr(wm, "filter_max_size", 0)
+    min_poly = getattr(wm, "filter_min_poly", 0)
+    max_poly = getattr(wm, "filter_max_poly", 0)
+    min_vert = getattr(wm, "filter_min_vert", 0)
+    max_vert = getattr(wm, "filter_max_vert", 0)
+    days_old = int(getattr(wm, "filter_days_old", '0'))
     
     # Clear existing items
-    scene.asset_items.clear()
+    wm.asset_items.clear()
     
     # Get paginated data from database
     assets, total = db_get_paginated(
@@ -69,19 +69,20 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
     )
     
     # Store pagination state in scene
-    scene.asset_total_count = total
-    scene.asset_current_page = page
-    scene.asset_page_size = page_size
-    scene.asset_total_pages = (total + page_size - 1) // page_size if total > 0 else 0
+    wm.asset_total_count = total
+    wm.asset_current_page = page
+    wm.asset_page_size = page_size
+    wm.asset_total_pages = (total + page_size - 1) // page_size if total > 0 else 0
     
     # Load assets to scene collection
     # Load assets to scene collection
+    assets_ready = []
+    
     for a in assets:
-        item = scene.asset_items.add()
+        item = wm.asset_items.add()
         
-        item.id = a["id"]
-        item.uuid = a["uuid"]
-        
+        item.id = a.get("id") or 0
+        item.uuid = a.get("uuid") or ""
         item.name = a.get("name") or ""
         item.category = a.get("category") or ""
         item.description = a.get("description") or ""
@@ -97,24 +98,31 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
         item.updated_at = a.get("updated_at") or ""
         item.is_favorite = bool(a.get("is_favorite"))
         
-        # PERBAIKI INI: Simpan thumbnail_path dari database, bukan key
-        item.preview_icon = a.get("thumbnail_path") or ""  # Path thumbnail dari DB
+        # Portability Fix: Resolve paths to current OS
+        from .paths import resolve_portable_path
+        item.file_path = resolve_portable_path(a.get("file_path", ""), 'EXPORTS')
+        
+        # PREVIEW: Store resolved path
+        thumb_path = resolve_portable_path(a.get("thumbnail_path") or "", 'THUMBNAILS')
+        item.preview_icon = thumb_path
+        
+        # Add to the assets for preview loading (use a copy to resolve paths for the loader too)
+        a_copy = dict(a)
+        a_copy['file_path'] = item.file_path
+        a_copy['thumbnail_path'] = thumb_path
+        assets_ready.append(a_copy)
     
-    # Reset selection to first item
-    if len(scene.asset_items) > 0:
-        scene.asset_index = 0
-
-    # PRE-LOAD previews untuk assets yang baru dimuat
+    # PRE-LOAD previews for assets in background
     from .preview import load_previews_for_assets
-    load_previews_for_assets(assets)  # assets sudah berisi data dari db_get_paginated
+    load_previews_for_assets(assets_ready)
 
-    return len(scene.asset_items)
+    return len(wm.asset_items)
 
 # =====================================================
 # SINGLE ASSET OPERATIONS (EFFICIENT)
 # =====================================================
 
-def update_single_asset_in_scene(context, asset_id):
+def update_single_asset_in_scene(context, asset_id): # wm safe
     """
     Update a single asset in scene without reloading all.
     Much faster than load_assets_to_scene() for single updates.
@@ -126,7 +134,7 @@ def update_single_asset_in_scene(context, asset_id):
     Returns:
         bool: True if found and updated, False otherwise
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
     # Get updated data from database
     updated = db_get_by_id(asset_id)
@@ -135,7 +143,7 @@ def update_single_asset_in_scene(context, asset_id):
     
     # Find and update in scene
     found = False
-    for item in scene.asset_items:
+    for item in wm.asset_items:
         if item.id == asset_id:
             # Update all fields
             item.uuid = updated.get("uuid") or ""
@@ -160,7 +168,7 @@ def update_single_asset_in_scene(context, asset_id):
     return found
 
 
-def add_single_asset_to_scene(context, asset_id):
+def add_single_asset_to_scene(context, asset_id): # wm safe
     """
     Add a newly registered asset to the scene.
     Adds to beginning of list (most recent first).
@@ -172,7 +180,7 @@ def add_single_asset_to_scene(context, asset_id):
     Returns:
         bool: True if added, False otherwise
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     asset = db_get_by_id(asset_id)
     
     if not asset:
@@ -181,7 +189,7 @@ def add_single_asset_to_scene(context, asset_id):
     # Insert at beginning (most recent first)
     # Note: Blender doesn't support insert at index, so we reload
     # For production, consider maintaining sort order in UI
-    item = scene.asset_items.add()
+    item = wm.asset_items.add()
     
     item.id = asset["id"]
     item.uuid = asset["uuid"]
@@ -205,7 +213,7 @@ def add_single_asset_to_scene(context, asset_id):
     return True
 
 
-def remove_single_asset_from_scene(context, asset_id):
+def remove_single_asset_from_scene(context, asset_id): # wm safe
     """
     Remove a single asset from scene collection.
     
@@ -216,24 +224,24 @@ def remove_single_asset_from_scene(context, asset_id):
     Returns:
         bool: True if removed, False if not found
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
     # Find index
     index_to_remove = -1
-    for i, item in enumerate(scene.asset_items):
+    for i, item in enumerate(wm.asset_items):
         if item.id == asset_id:
             index_to_remove = i
             break
     
     if index_to_remove >= 0:
-        scene.asset_items.remove(index_to_remove)
+        wm.asset_items.remove(index_to_remove)
         
         # Adjust selection
-        if scene.asset_index >= len(scene.asset_items):
-            scene.asset_index = max(0, len(scene.asset_items) - 1)
+        if wm.asset_index >= len(wm.asset_items):
+            wm.asset_index = max(0, len(wm.asset_items) - 1)
         
         # Update count
-        scene.asset_total_count = getattr(scene, "asset_total_count", 0) - 1
+        wm.asset_total_count = getattr(wm, "asset_total_count", 0) - 1
         
         return True
     
@@ -255,14 +263,14 @@ def go_to_page(context, page):
     Returns:
         bool: True if successful
     """
-    scene = context.scene
-    total_pages = getattr(scene, "asset_total_pages", 0)
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    total_pages = getattr(wm, "asset_total_pages", 0)
     
     # Validate page number
     if page < 0 or (total_pages > 0 and page >= total_pages):
         return False
     
-    page_size = getattr(scene, "asset_page_size", 10)
+    page_size = getattr(wm, "asset_page_size", 10)
     load_assets_to_scene(context, page=page, page_size=page_size, force_reload=True)
     
     return True
@@ -270,9 +278,9 @@ def go_to_page(context, page):
 
 def next_page(context):
     """Go to next page."""
-    scene = context.scene
-    current = getattr(scene, "asset_current_page", 0)
-    total_pages = getattr(scene, "asset_total_pages", 0)
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    current = getattr(wm, "asset_current_page", 0)
+    total_pages = getattr(wm, "asset_total_pages", 0)
     
     if current < total_pages - 1:
         return go_to_page(context, current + 1)
@@ -282,8 +290,8 @@ def next_page(context):
 
 def previous_page(context):
     """Go to previous page."""
-    scene = context.scene
-    current = getattr(scene, "asset_current_page", 0)
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    current = getattr(wm, "asset_current_page", 0)
     
     if current > 0:
         return go_to_page(context, current - 1)
@@ -298,8 +306,8 @@ def first_page(context):
 
 def last_page(context):
     """Go to last page."""
-    scene = context.scene
-    total_pages = getattr(scene, "asset_total_pages", 0)
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    total_pages = getattr(wm, "asset_total_pages", 0)
     
     if total_pages > 0:
         return go_to_page(context, total_pages - 1)
@@ -316,9 +324,9 @@ def refresh_current_page(context):
     Refresh current page (reload from database).
     Useful after external changes to database.
     """
-    scene = context.scene
-    current_page = getattr(scene, "asset_current_page", 0)
-    page_size = getattr(scene, "asset_page_size", 10)
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    current_page = getattr(wm, "asset_current_page", 0)
+    page_size = getattr(wm, "asset_page_size", 10)
     
     load_assets_to_scene(context, page=current_page, page_size=page_size, force_reload=True)
 
@@ -327,14 +335,14 @@ def clear_scene_assets(context):
     """
     Clear all assets from scene.
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
-    if hasattr(scene, "asset_items"):
-        scene.asset_items.clear()
-        scene.asset_index = 0
-        scene.asset_total_count = 0
-        scene.asset_current_page = 0
-        scene.asset_total_pages = 0
+    if hasattr(wm, "asset_items"):
+        wm.asset_items.clear()
+        wm.asset_index = 0
+        wm.asset_total_count = 0
+        wm.asset_current_page = 0
+        wm.asset_total_pages = 0
 
 
 # =====================================================
@@ -346,10 +354,10 @@ def on_filter_changed(context):
     Called when user changes search/filter parameters.
     Reloads from page 0 with new filters.
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
     # Advanced filters are now perfectly supported by paginated loader
-    page_size = getattr(scene, "asset_page_size", 10)
+    page_size = getattr(wm, "asset_page_size", 10)
     load_assets_to_scene(context, page=0, page_size=page_size, force_reload=True)
 
 
@@ -362,13 +370,13 @@ def load_preview_for_current_selection(context):
     """
     Load preview only for currently selected asset (lazy loading).
     """
-    scene = context.scene
-    idx = scene.asset_index
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    idx = wm.asset_index
     
-    if idx < 0 or idx >= len(scene.asset_items):
+    if idx < 0 or idx >= len(wm.asset_items):
         return None
     
-    item = scene.asset_items[idx]
+    item = wm.asset_items[idx]
     asset = db_get_by_id(item.id)
     
     if asset:
@@ -386,11 +394,11 @@ def preload_visible_previews(context, start_idx=0, count=10):
         start_idx (int): Start index
         count (int): Number of previews to preload
     """
-    scene = context.scene
-    end_idx = min(start_idx + count, len(scene.asset_items))
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    end_idx = min(start_idx + count, len(wm.asset_items))
     
     for i in range(start_idx, end_idx):
-        item = scene.asset_items[i]
+        item = wm.asset_items[i]
         asset = db_get_by_id(item.id)
         if asset:
             load_preview_for_single_asset(asset)
@@ -401,10 +409,10 @@ def cleanup_unused_previews(context):
     Unload previews that are not in current page.
     Frees memory for large asset libraries.
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
     # Get UUIDs of current page
-    current_uuids = {item.uuid for item in scene.asset_items}
+    current_uuids = {item.uuid for item in wm.asset_items}
     
     # This would require access to preview collection
     # Implementation depends on preview.py structure
@@ -427,12 +435,12 @@ def get_asset_by_index(context, index):
     Returns:
         dict or None: Asset data from database
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
-    if index < 0 or index >= len(scene.asset_items):
+    if index < 0 or index >= len(wm.asset_items):
         return None
     
-    item = scene.asset_items[index]
+    item = wm.asset_items[index]
     return db_get_by_id(item.id)
 
 
@@ -443,8 +451,8 @@ def get_selected_asset(context):
     Returns:
         dict or None: Asset data from database
     """
-    scene = context.scene
-    return get_asset_by_index(context, scene.asset_index)
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    return get_asset_by_index(context, wm.asset_index)
 
 
 def count_assets_in_scene(context):
@@ -454,8 +462,8 @@ def count_assets_in_scene(context):
     Returns:
         int: Number of loaded assets
     """
-    scene = context.scene
-    return len(scene.asset_items) if hasattr(scene, "asset_items") else 0
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
+    return len(wm.asset_items) if hasattr(wm, "asset_items") else 0
 
 
 def get_pagination_info(context):
@@ -465,12 +473,12 @@ def get_pagination_info(context):
     Returns:
         dict: Pagination info (current_page, total_pages, etc.)
     """
-    scene = context.scene
+    wm = getattr(context, "window_manager", None) or (bpy.data.window_managers[0] if hasattr(bpy.data, "window_managers") and bpy.data.window_managers else None)
     
     return {
-        'current_page': getattr(scene, "asset_current_page", 0),
-        'total_pages': getattr(scene, "asset_total_pages", 0),
-        'page_size': getattr(scene, "asset_page_size", 10),
-        'total_count': getattr(scene, "asset_total_count", 0),
-        'loaded_count': len(scene.asset_items) if hasattr(scene, "asset_items") else 0,
+        'current_page': getattr(wm, "asset_current_page", 0),
+        'total_pages': getattr(wm, "asset_total_pages", 0),
+        'page_size': getattr(wm, "asset_page_size", 10),
+        'total_count': getattr(wm, "asset_total_count", 0),
+        'loaded_count': len(wm.asset_items) if hasattr(wm, "asset_items") else 0,
     }

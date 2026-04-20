@@ -18,8 +18,8 @@ class ASSETMANAGER_OT_toggle_favorite(bpy.types.Operator):
 
             # If filtering by favorites, a full reload is needed so the
             # unfavorited asset disappears from the filtered list immediately.
-            scene = context.scene
-            filter_favorites = getattr(scene, 'filter_favorites', False)
+            wm = context.window_manager
+            filter_favorites = getattr(wm, 'filter_favorites', False)
             if filter_favorites:
                 from ..core.scene_assets import refresh_current_page
                 refresh_current_page(context)

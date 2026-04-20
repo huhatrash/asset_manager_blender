@@ -34,6 +34,9 @@ def get_connection():
     # Mode WAL (Write-Ahead Logging) memungkinkan proses baca & tulis berjalan bersamaan tanpa saling mengunci (locking)
     conn.execute("PRAGMA journal_mode=WAL;")
     
+    # Tunggu jika DB sedang sibuk (locking) daripada langsung crash (OperationalError)
+    conn.execute("PRAGMA busy_timeout=10000;")
+    
     # NORMAL adalah mode sinkronisasi yang cepat namun tetap aman untuk aplikasi desktop
     conn.execute("PRAGMA synchronous=NORMAL;")
     
@@ -1005,3 +1008,50 @@ def db_get_recently_used(limit=50):
     finally:
         cur.close()
         conn.close()
+
+
+def db_get_library_stats():
+    """
+    Get diagnostic statistics about the library.
+    Returns:
+        dict: Total assets, per-category count, total file size, etc.
+    """
+    conn = get_connection()
+    cur = conn.cursor()
+    
+    stats = {}
+    
+    try:
+        # Total count
+        cur.execute("SELECT COUNT(*) as total FROM assets")
+        stats['total_assets'] = cur.fetchone()['total']
+        
+        # Categories
+        cur.execute("SELECT category, COUNT(*) as count FROM assets GROUP BY category")
+        stats['categories'] = {row['category']: row['count'] for row in cur.fetchall()}
+        
+        # Favorites
+        cur.execute("SELECT COUNT(*) as favs FROM assets WHERE is_favorite = 1")
+        stats['favorites'] = cur.fetchone()['favs']
+        
+        # File sizes
+        cur.execute("SELECT SUM(file_size) as total_size FROM assets")
+        row = cur.fetchone()
+        stats['total_bytes'] = row['total_size'] if row['total_size'] else 0
+        
+        # Usage history count (safely check for table)
+        try:
+            cur.execute("SELECT COUNT(*) as history FROM asset_usage")
+            row = cur.fetchone()
+            stats['history_count'] = row['history'] if row else 0
+        except:
+            stats['history_count'] = 0
+            
+    except Exception as e:
+        print(f"[AssetManager] db_get_library_stats error: {e}")
+        stats = {'error': str(e)}
+    finally:
+        cur.close()
+        conn.close()
+        
+    return stats

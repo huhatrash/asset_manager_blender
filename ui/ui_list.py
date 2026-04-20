@@ -76,46 +76,28 @@ class ASSETMANAGER_UL_list(bpy.types.UIList):
             op.asset_id = item.id
     
     def _get_preview_icon(self, item):
-        """Get preview icon ID for an asset item"""
+        """
+        Get preview icon ID for an asset item.
+        CRITICAL: No disk I/O or DB queries allowed in this loop!
+        """
         try:
-            pcoll = get_preview_collection()
+            # 1. Get centralized key
+            from ..core.preview import get_asset_preview_key, get_preview_collection
+            preview_key = get_asset_preview_key(item)
             
+            pcoll = get_preview_collection()
             if not pcoll:
                 return 0
             
-            # Gunakan fungsi terpusat untuk mendapatkan kunci preview
-            from ..core.preview import get_asset_preview_key
-            preview_key = get_asset_preview_key(item)
-            
-            # Jika sudah ada di cache, langsung return
-            if preview_key and preview_key in pcoll:
+            # 2. Fast Lookup: Only return if already loaded in pcoll
+            if preview_key in pcoll:
                 return pcoll[preview_key].icon_id
             
-            # ✅ LOAD ON-DEMAND dari thumbnail path yang sudah ada di item
-            if item.preview_icon and os.path.exists(item.preview_icon):
-                try:
-                    preview = pcoll.load(preview_key, item.preview_icon, 'IMAGE')
-                    if preview:
-                        return preview.icon_id
-                except Exception as e:
-                    print(f"[AssetManager] Failed to load preview: {e}")
-            
-            # Fallback: coba ambil dari database
-            asset_data = db_get_by_id(item.id)
-            if asset_data:
-                thumbnail_path = asset_data.get('thumbnail_path')
-                if thumbnail_path and os.path.exists(thumbnail_path):
-                    try:
-                        preview = pcoll.load(preview_key, thumbnail_path, 'IMAGE')
-                        if preview:
-                            return preview.icon_id
-                    except Exception as e:
-                        print(f"[AssetManager] Failed to load from DB: {e}")
-            
+            # NOTE: If not in pcoll, we return 0 (fallback icon will be shown)
+            # Pre-loading is handled by scene_assets.load_assets_to_scene() or timers.
             return 0
             
-        except Exception as e:
-            print(f"[AssetManager] Preview icon error: {e}")
+        except Exception:
             return 0
 
 

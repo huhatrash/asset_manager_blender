@@ -150,11 +150,6 @@ class ASSETMANAGER_OT_update_source(bpy.types.Operator):
         uuid = asset.get('uuid')
         exports_dir = get_exports_dir()
         
-        if old_file_path:
-            ext = os.path.splitext(old_file_path)[1]
-        else:
-            ext = '.fbx'
-            
         ext = os.path.splitext(old_file_path)[1] if old_file_path else '.fbx'
         
         # Consistent filename construction
