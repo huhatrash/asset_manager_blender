@@ -73,9 +73,9 @@ class AssetItem(bpy.types.PropertyGroup):
         subtype='UNSIGNED'
     )
     
-    faces: bpy.props.IntProperty(
-        name="Faces",
-        description="Number of faces",
+    edges: bpy.props.IntProperty(
+        name="Edges",
+        description="Number of edges",
         default=0,
         subtype='UNSIGNED'
     )

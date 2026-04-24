@@ -92,7 +92,7 @@ def load_assets_to_scene(context, page=0, page_size=10, force_reload=False):
         
         item.poly_count = a.get("poly_count") or 0
         item.vertices = a.get("vertices") or 0
-        item.faces = a.get("faces") or 0
+        item.edges = a.get("edges") or 0
         
         item.created_at = a.get("created_at") or ""
         item.updated_at = a.get("updated_at") or ""
@@ -154,7 +154,7 @@ def update_single_asset_in_scene(context, asset_id): # wm safe
             item.file_size = updated.get("file_size") or 0
             item.poly_count = updated.get("poly_count") or 0
             item.vertices = updated.get("vertices") or 0
-            item.faces = updated.get("faces") or 0
+            item.edges = updated.get("edges") or 0
             item.updated_at = updated.get("updated_at") or ""
             item.is_favorite = bool(updated.get("is_favorite"))
             item.preview_icon = updated.get("thumbnail_path") or "" 
@@ -200,7 +200,7 @@ def add_single_asset_to_scene(context, asset_id): # wm safe
     item.file_size = asset.get("file_size") or 0
     item.poly_count = asset.get("poly_count") or 0
     item.vertices = asset.get("vertices") or 0
-    item.faces = asset.get("faces") or 0
+    item.edges = asset.get("edges") or 0
     item.created_at = asset.get("created_at") or ""
     item.updated_at = asset.get("updated_at") or ""
     item.is_favorite = bool(asset.get("is_favorite"))

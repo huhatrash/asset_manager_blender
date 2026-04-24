@@ -242,5 +242,5 @@ class ASSETMANAGER_OT_update_source(bpy.types.Operator):
         return {
             'poly_count': len(mesh.polygons),
             'vertices': len(mesh.vertices),
-            'faces': len(mesh.polygons)
+            'edges': len(mesh.edges)
         }

@@ -34,7 +34,8 @@ SORT_LABELS = {
     'category': 'Category',
     'file_size': 'Size',
     'poly_count': 'Polys',
-    'vertices': 'Vertices',
+    'vertices': 'Verts',
+    'edges': 'Edges',
 }
 
 
@@ -270,6 +271,7 @@ class ASSETMANAGER_PT_details(bpy.types.Panel):
         grid = box.grid_flow(columns=2, even_columns=True, even_rows=True, align=True)
 
         grid.label(text=f"Polys: {_format_count(item.poly_count)}", icon='MESH_DATA')
+        grid.label(text=f"Edges: {_format_count(item.edges)}", icon='EDGESEL')
         grid.label(text=f"Verts: {_format_count(item.vertices)}", icon='VERTEXSEL')
 
         layout.separator(factor=0.6)

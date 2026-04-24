@@ -33,12 +33,11 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
     # Properties
     registration_mode: bpy.props.EnumProperty(
         name="Mode",
-        description="Pilih untuk menimpa data lama (Update) atau membuat variasi baru (New)",
+        description="Aset terdeteksi sudah ada. Daftarkan sebagai variasi baru?",
         items=[
-            ('UPDATE', 'Update Existing Asset', 'Timpa data aset yang lama (Skenario 1)'),
-            ('NEW', 'Register as New Asset', 'Buat sebagai aset baru / Aset 2 (Skenario 2)'),
+            ('NEW', 'Register as New Asset', 'Buat sebagai aset baru / variasi baru (Skenario 2)'),
         ],
-        default='UPDATE'
+        default='NEW'
     )
     
     
@@ -130,7 +129,7 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             existing_in_db = db_get_by_uuid(str(uuid_detected))
             if existing_in_db:
                 self.has_existing_uuid = True
-                self.registration_mode = 'UPDATE'
+                self.registration_mode = 'NEW'
             else:
                 self.has_existing_uuid = False
                 self.registration_mode = 'NEW'
@@ -168,11 +167,12 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
             row.label(text=f"WARNING: Rename '{current_name}' to something unique!", icon='ERROR')
             layout.separator(factor=0.5)
         
-        # Tampilkan pilihan mode jika objek sudah pernah terdaftar di DB
+        # Tampilkan peringatan jika objek sudah pernah terdaftar di DB
         if self.has_existing_uuid:
             box = layout.box()
-            box.label(text="This record already exists!", icon='INFO')
-            box.prop(self, "registration_mode", expand=True)
+            box.alert = True
+            box.label(text="This object is already in Library!", icon='INFO')
+            box.label(text="It will be registered as a NEW variation.", icon='MODIFIER')
             layout.separator()
         
         # Asset Info
@@ -232,24 +232,15 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
 
         try:
             # --- PENENTUAN UUID & MODE ---
-            if self.has_existing_uuid and self.registration_mode == 'UPDATE':
-                # Skenario 1: Pakai UUID lama → timpa data yang sudah ada
-                asset_uuid = str(obj.get("asset_uuid", uuid.uuid4()))
-                db_mode = 'UPDATE'
-            elif self.has_existing_uuid and self.registration_mode == 'NEW':
-                # Skenario 2: Objek sudah punya UUID di DB, tapi user minta buat aset BARU (Varian).
+            if self.has_existing_uuid:
+                # Objek sudah punya UUID di DB, kita buat UUID baru agar menjadi variasi (bukan menimpa)
                 asset_uuid = str(uuid.uuid4())
                 db_mode = 'NEW'
             else:
-                # Aset belum terdaftar di DB lokal (atau benar-benar baru)
-                original_uuid = obj.get("asset_uuid")
-                if original_uuid:
-                    asset_uuid = str(original_uuid)
-                    db_mode = 'NEW'
-                else:
-                    asset_uuid = str(uuid.uuid4())
-                    obj["asset_uuid"] = asset_uuid
-                    db_mode = 'NEW'
+                # Aset benar-benar baru
+                asset_uuid = str(uuid.uuid4())
+                obj["asset_uuid"] = asset_uuid
+                db_mode = 'NEW'
 
             
             # Step 1: Export asset file
@@ -279,7 +270,7 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
                 file_size,
                 stats['poly_count'],
                 stats['vertices'],
-                stats['faces'],
+                stats['edges'],
                 mode=db_mode
             )
             
@@ -390,9 +381,10 @@ class ASSETMANAGER_OT_register(bpy.types.Operator):
         # Safe access for Blender 4.x/5.x
         polygons = getattr(mesh, "polygons", [])
         vertices = getattr(mesh, "vertices", [])
+        edges = getattr(mesh, "edges", [])
         
         return {
             'poly_count': len(polygons),
             'vertices': len(vertices),
-            'faces': len(polygons)
+            'edges': len(edges)
         }

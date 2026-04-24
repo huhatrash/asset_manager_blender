@@ -75,7 +75,7 @@ _REQUIRED_COLUMNS = {
     "file_size":       "INTEGER DEFAULT 0",
     "poly_count":      "INTEGER DEFAULT 0",
     "vertices":        "INTEGER DEFAULT 0",
-    "faces":           "INTEGER DEFAULT 0",
+    "edges":           "INTEGER DEFAULT 0",
     "created_at":      "TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))",
     "updated_at":      "TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))",
     "is_favorite":     "INTEGER NOT NULL DEFAULT 0",
@@ -112,6 +112,14 @@ def _migrate_schema(conn, cur):
                 print(f"[AssetManager] Migrated: added column '{col_name}'")
             except sqlite3.OperationalError as e:
                 print(f"[AssetManager] Migration warning for '{col_name}': {e}")
+
+    # ── Drop redundant 'faces' column if it exists ───────────────────────────
+    if "faces" in existing:
+        try:
+            cur.execute("ALTER TABLE assets DROP COLUMN faces")
+            print("[AssetManager] Migrated: dropped redundant column 'faces'")
+        except sqlite3.OperationalError as e:
+            print(f"[AssetManager] Migration warning (drop faces): {e}")
 
     # ── Ensure asset_usage has the correct schema ────────────────────────────
     # Check if the table exists and has 'used_at'. If the table was created
@@ -174,7 +182,7 @@ def init_db():
             file_size       INTEGER DEFAULT 0,
             poly_count      INTEGER DEFAULT 0,
             vertices        INTEGER DEFAULT 0,
-            faces           INTEGER DEFAULT 0,
+            edges           INTEGER DEFAULT 0,
 
             created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
             updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -276,7 +284,7 @@ def create_table_if_not_exists():
 
 def db_insert_or_update_by_uuid(
     uuid, name, category, description, file_path, thumbnail_path,
-    file_size, poly_count, vertices, faces, mode='AUTO'
+    file_size, poly_count, vertices, edges, mode='AUTO'
 ):
     """
     
@@ -292,7 +300,7 @@ def db_insert_or_update_by_uuid(
                 INSERT INTO assets (
                     uuid, name, category, description,
                     file_path, thumbnail_path,
-                    file_size, poly_count, vertices, faces,
+                    file_size, poly_count, vertices, edges,
                     created_at, updated_at
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -302,7 +310,7 @@ def db_insert_or_update_by_uuid(
             """, (
                 uuid, name, category, description,
                 file_path, thumbnail_path,
-                file_size, poly_count, vertices, faces
+                file_size, poly_count, vertices, edges
             ))
             print(f"[AssetManager] Skenario 2: Terdaftar sebagai aset baru (Aset 2)")
             inserted = True
@@ -320,12 +328,12 @@ def db_insert_or_update_by_uuid(
                     UPDATE assets SET
                         name=?, category=?, description=?, file_path=?,
                         thumbnail_path=?, file_size=?, poly_count=?,
-                        vertices=?, faces=?,
+                        vertices=?, edges=?,
                         updated_at=datetime('now', 'localtime')
                     WHERE uuid=?
                 """, (
                     name, category, description, file_path,
-                    thumbnail_path, file_size, poly_count, vertices, faces,
+                    thumbnail_path, file_size, poly_count, vertices, edges,
                     uuid
                 ))
                 print(f"[AssetManager] Skenario 1: Data aset lama diperbarui")
@@ -336,7 +344,7 @@ def db_insert_or_update_by_uuid(
                     INSERT INTO assets (
                         uuid, name, category, description,
                         file_path, thumbnail_path,
-                        file_size, poly_count, vertices, faces,
+                        file_size, poly_count, vertices, edges,
                         created_at, updated_at
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -346,7 +354,7 @@ def db_insert_or_update_by_uuid(
                 """, (
                     uuid, name, category, description,
                     file_path, thumbnail_path,
-                    file_size, poly_count, vertices, faces
+                    file_size, poly_count, vertices, edges
                 ))
                 print(f"[AssetManager] Aset baru terdaftar")
                 inserted = True
@@ -371,7 +379,7 @@ def db_batch_insert_optimized(assets_data):
     Args:
         assets_data: list of tuples
             (uuid, name, category, description, file_path, thumbnail_path,
-             file_size, poly_count, vertices, faces)
+             file_size, poly_count, vertices, edges)
 
     Returns:
         int: Number of rows actually inserted
@@ -387,7 +395,7 @@ def db_batch_insert_optimized(assets_data):
             INSERT OR IGNORE INTO assets (
                 uuid, name, category, description,
                 file_path, thumbnail_path,
-                file_size, poly_count, vertices, faces,
+                file_size, poly_count, vertices, edges,
                 created_at, updated_at
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -423,6 +431,7 @@ _VALID_SORT_COLUMNS = {
     'file_size':   'file_size',
     'poly_count':  'poly_count',
     'vertices':    'vertices',
+    'edges':       'edges',
     'popularity':  'use_count',
 }
 
@@ -599,7 +608,7 @@ def db_search_assets(search_term='', category='ALL', min_size=0, max_size=0,
 _UPDATABLE_FIELDS = frozenset({
     'name', 'category', 'description', 'file_path',
     'thumbnail_path', 'file_size', 'poly_count',
-    'vertices', 'faces',
+    'vertices', 'edges',
 })
 
 
