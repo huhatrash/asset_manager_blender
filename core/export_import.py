@@ -263,8 +263,14 @@ def export_selected_to_gltf(obj, output_dir, filename=None):
             bpy.context.view_layer.objects.active = original_active
         
         if os.path.exists(output_path):
-            print(f"[AssetManager] Exported to: {output_path}")
-            return output_path
+            file_size = os.path.getsize(output_path)
+            if file_size > 0:
+                print(f"[AssetManager] Exported to: {output_path} ({file_size} bytes)")
+                return output_path
+            else:
+                print(f"[AssetManager] Export produced empty file: {output_path}")
+                os.remove(output_path)
+                return None
         else:
             return None
             
@@ -633,35 +639,71 @@ def import_obj_file(filepath):
 
 
 def import_gltf_file(filepath):
-    """Import glTF/GLB file and return imported objects."""
-    if not os.path.exists(filepath): return []
+    """Import glTF/GLB file with safety checks to prevent crashes on corrupt files."""
+    if not os.path.exists(filepath): 
+        return []
+        
+    # --- SAFETY CHECK 1: File Integrity ---
+    if os.path.getsize(filepath) < 12: # Minimal GLB header size
+        print(f"[AssetManager] Skipping import: File is empty or too small ({filepath})")
+        return []
+
+    # --- SAFETY CHECK 2: Addon State ---
+    # Force enable glTF addon if it's disabled
+    addon_id = "io_scene_gltf2"
+    if addon_id not in bpy.context.preferences.addons:
+        try:
+            bpy.ops.preferences.addon_enable(module=addon_id)
+            print("[AssetManager] Automatically enabled 'glTF 2.0' addon")
+        except:
+            print("[AssetManager] Failed to enable 'glTF 2.0' addon. Import may fail.")
+
     objects_before = set(bpy.data.objects)
+    
     try:
         success = False
+        
+        # --- SAFETY CHECK 3: Active Context ---
+        # Ensure we are in Object Mode and NOTHING is selected
+        # Selected objects in the target scene can sometimes interfere with glTF hierarchy builder
+        if bpy.context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        bpy.ops.object.select_all(action='DESELECT')
+        bpy.context.view_layer.objects.active = None
+
         # 1. Try modern wm.gltf_import (Blender 4.2+)
         if hasattr(bpy.ops.wm, "gltf_import"):
             try:
-                bpy.ops.wm.gltf_import(filepath=filepath)
+                # Use INVOKE_DEFAULT to ensure the operator gets a fresh context
+                bpy.ops.wm.gltf_import('EXEC_DEFAULT', filepath=filepath)
                 success = True
-            except:
-                pass
+            except Exception as e:
+                print(f"[AssetManager] Modern glTF importer crashed: {e}")
         
         # 2. Try legacy import_scene.gltf
         if not success and hasattr(bpy.ops.import_scene, "gltf"):
             try:
                 bpy.ops.import_scene.gltf(filepath=filepath)
                 success = True
-            except:
-                pass
+            except Exception as e:
+                print(f"[AssetManager] Legacy glTF importer crashed: {e}")
                 
         if not success:
-            print("[AssetManager] glTF/GLB importer not found. Please enable 'glTF 2.0' addon.")
+            print("[AssetManager] glTF/GLB importer failed or not found.")
             return []
             
         objects_after = set(bpy.data.objects)
-        return list(objects_after - objects_before)
+        imported = list(objects_after - objects_before)
+        
+        # If no objects imported but success was True, it's a "zombie" file
+        if success and not imported:
+            print("[AssetManager] Import reported success but no objects were created (Likely empty file).")
+            
+        return imported
+        
     except Exception as e:
-        print(f"[AssetManager] GLB import error: {e}")
+        print(f"[AssetManager] Hard crash during GLB import: {e}")
         return []
 
 

@@ -236,7 +236,7 @@ class ASSETMANAGER_PT_details(bpy.types.Panel):
 
         item = wm.asset_items[idx]
 
-        # ── 🚨 ROBUST FEEDBACK: Check if file exists ──────────────────────────
+        # ── ROBUST FEEDBACK: Check if file exists ──────────────────────────
         file_exists = safe_file_exists(item.file_path)
         
         if not file_exists:
@@ -365,11 +365,6 @@ class ASSETMANAGER_PT_filters(bpy.types.Panel):
 
 
 # =====================================================
-# 4) QUICK FILTERS  — collapsed by default
-# =====================================================
-
-
-# =====================================================
 # 5.5) RECENTLY USED  — collapsed by default
 # =====================================================
 
@@ -394,7 +389,6 @@ def _relative_time(dt_str):
             return then.strftime("%d %b")
     except Exception:
         return dt_str[:10]
-
 
 class ASSETMANAGER_PT_recently_used(bpy.types.Panel):
     """Show recently loaded assets"""
@@ -507,8 +501,6 @@ class ASSETMANAGER_PT_management(bpy.types.Panel):
         row = col.row(align=True)
         row.operator("assetmanager.import_local",
                      icon='IMPORT', text="Import Library")
-        row.operator("assetmanager.export_local",
-                     icon='EXPORT', text="Export Library")
 
         col.separator()
 

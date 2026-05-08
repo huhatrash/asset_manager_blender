@@ -1,16 +1,9 @@
-"""
-Asset Manager Blender Addon
-Main initialization file.
-
-Author: alfa haliza
-Version: 2.0 (Optimized for 1000+ assets)
-"""
 
 bl_info = {
     "name": "Local Asset Manager",
     "author": "alfa haliza",
-    "version": (2, 1, 0),
-    "blender": (4, 0, 0),
+    "version": (1, 0, 0),
+    "blender": (4, 5, 3),
     "description": "Professional asset management with support for thousands of assets (Blender 4.x - 5.x)",
     "category": "3D View",
     "doc_url": "",
@@ -47,7 +40,6 @@ from .operators import (
     delete_asset,
     load_asset,
     import_local,
-    export_local,
     show_catalog,
     pagination_operators,
     toggle_favorite,
@@ -87,7 +79,6 @@ classes = (
     load_asset.ASSETMANAGER_OT_load_from_db,
     load_asset.ASSETMANAGER_OT_load_from_db_deferred,
     import_local.ASSETMANAGER_OT_import_local,
-    export_local.ASSETMANAGER_OT_export_local,
     show_catalog.ASSETMANAGER_OT_show_catalog,
     show_catalog.ASSETMANAGER_OT_catalog_refresh,
     show_catalog.ASSETMANAGER_OT_catalog_goto_page,
@@ -134,6 +125,34 @@ classes = (
     ASSETMANAGER_PT_recently_used,
     ASSETMANAGER_PT_maintenance,
 )
+
+
+# =====================================================
+# SCENE CHANGE DETECTION
+# =====================================================
+
+_last_scene = None
+
+@persistent
+def assetmanager_scene_update(scene, depsgraph=None):
+    """Detect scene change and force UI refresh."""
+    global _last_scene
+    
+    # We only care about the current window's scene
+    current_scene = bpy.context.scene
+    if current_scene != _last_scene:
+        _last_scene = current_scene
+        
+        # Force a redraw of all 3D View areas to update the Asset Manager panel
+        for window in bpy.context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == 'VIEW_3D':
+                    area.tag_redraw()
+                    
+        # Optional: Reload assets if the list is empty (e.g. fresh startup/new scene)
+        wm = bpy.context.window_manager
+        if hasattr(wm, "asset_items") and len(wm.asset_items) == 0:
+             bpy.app.timers.register(load_assets_delayed, first_interval=0.1)
 
 
 # =====================================================
@@ -227,6 +246,10 @@ def register():
     if assetmanager_on_load not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(assetmanager_on_load)
     
+    # Register handler for scene change / updates
+    if assetmanager_scene_update not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(assetmanager_scene_update)
+    
     # Load assets with delay to avoid context issues
     try:
         bpy.app.timers.register(load_assets_delayed, first_interval=0.1)
@@ -244,9 +267,12 @@ def unregister():
     """Unregister addon and cleanup."""
     print("[AssetManager] Unregistering addon...")
     
-    # Remove handler
+    # Remove handlers
     if assetmanager_on_load in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(assetmanager_on_load)
+    
+    if assetmanager_scene_update in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(assetmanager_scene_update)
     
     # Clear preview cache
     clear_previews()
